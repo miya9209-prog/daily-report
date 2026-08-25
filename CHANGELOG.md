@@ -1,3 +1,10 @@
+# v3.2.0
+
+- 데이터·설정에 `Cafe24 연결 테스트` 버튼 추가
+- `어제 Cafe24 데이터 수집`, `오늘 Cafe24 데이터 수집` 버튼 추가
+- Cafe24 단독 수집은 Google Sheet/Sellmate/iApps 미설정 상태에서도 실행 가능
+- GitHub Actions/CLI 전체수집에서 Google 광고비 서비스계정이 없으면 광고비 단계 자동 건너뜀
+
 # CHANGELOG
 
 ## 3.1.0

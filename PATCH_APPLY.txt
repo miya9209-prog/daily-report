@@ -1,0 +1,12 @@
+MISHARP DAILY REPORT v3.2 PATCH
+
+현재 v3.1이 정상 배포되어 있는 경우 아래 5개 파일만 기존 GitHub 레포에 같은 경로로 덮어쓰면 됩니다.
+
+- misharp/ui/settings.py
+- scripts/sync_all.py
+- VERSION
+- CHANGELOG.md
+- SETUP_GUIDE_KO.md
+
+GitHub에 깨진 이름의 00_...md 파일이 이미 생겼다면 그 파일만 삭제하세요.
+정상 파일명은 00_먼저읽기.md 입니다.

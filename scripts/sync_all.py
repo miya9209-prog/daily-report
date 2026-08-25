@@ -31,8 +31,18 @@ def main() -> None:
         if not args.skip_products: print("[Cafe24 products]", d); sync_product_sales(d)
         sync_optional_daily_sources(d)
         d += timedelta(days=1)
-    if not args.skip_hourly: print("[Cafe24 hourly]", end); sync_hourly(end)
-    if not args.skip_adsheet: print("[Google ad sheet]"); print(sync_google_ad_costs(), "dates updated")
+    if not args.skip_hourly:
+        print("[Cafe24 hourly]", end)
+        sync_hourly(end)
+
+    settings = get_settings()
+    if args.skip_adsheet:
+        print("[Google ad sheet skipped] --skip-adsheet")
+    elif not settings.google_service_account_json:
+        print("[Google ad sheet skipped] GOOGLE_SERVICE_ACCOUNT_JSON not configured")
+    else:
+        print("[Google ad sheet]")
+        print(sync_google_ad_costs(), "dates updated")
     if args.inventory:
         try:
             print("[Sellmate inventory]", end); print(sync_sellmate_inventory(end), "inventory rows updated")
