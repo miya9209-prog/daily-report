@@ -1,0 +1,60 @@
+name: MISHARP data sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "재동기화할 최근 일수"
+        required: false
+        default: "1"
+  schedule:
+    - cron: "17,47 * * * *"
+      timezone: "Asia/Seoul"
+    - cron: "13 3 * * *"
+      timezone: "Asia/Seoul"
+
+concurrency:
+  group: misharp-data-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_SCHEMA: ${{ secrets.DATABASE_SCHEMA }}
+      TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+      CAFE24_MALL_ID: ${{ secrets.CAFE24_MALL_ID }}
+      CAFE24_CLIENT_ID: ${{ secrets.CAFE24_CLIENT_ID }}
+      CAFE24_CLIENT_SECRET: ${{ secrets.CAFE24_CLIENT_SECRET }}
+      CAFE24_REDIRECT_URI: ${{ secrets.CAFE24_REDIRECT_URI }}
+      CAFE24_SCOPES: ${{ secrets.CAFE24_SCOPES }}
+      CAFE24_API_VERSION: ${{ secrets.CAFE24_API_VERSION }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      AD_SHEET_ID: ${{ secrets.AD_SHEET_ID }}
+      AD_SHEET_GID: ${{ secrets.AD_SHEET_GID }}
+      AD_SHEET_DATE_HEADER: ${{ secrets.AD_SHEET_DATE_HEADER }}
+      AD_SHEET_COST_HEADER: ${{ secrets.AD_SHEET_COST_HEADER }}
+      SELLMATE_API_BASE_URL: ${{ secrets.SELLMATE_API_BASE_URL }}
+      SELLMATE_API_KEY: ${{ secrets.SELLMATE_API_KEY }}
+      SELLMATE_INVENTORY_ENDPOINT: ${{ secrets.SELLMATE_INVENTORY_ENDPOINT }}
+      SELLMATE_SHIPPING_ENDPOINT: ${{ secrets.SELLMATE_SHIPPING_ENDPOINT }}
+      IAPPS_API_BASE_URL: ${{ secrets.IAPPS_API_BASE_URL }}
+      IAPPS_API_KEY: ${{ secrets.IAPPS_API_KEY }}
+      IAPPS_DAILY_ENDPOINT: ${{ secrets.IAPPS_DAILY_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - run: python -m scripts.migrate_v2
+      - name: Sync
+        shell: bash
+        run: |
+          if [ "${{ github.event.schedule }}" = "13 3 * * *" ]; then
+            python -m scripts.sync_all --days 7 --inventory
+          else
+            python -m scripts.sync_all --days "${{ inputs.days || '1' }}"
+          fi
