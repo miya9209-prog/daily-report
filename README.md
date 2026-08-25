@@ -65,11 +65,24 @@ iApps ────────────────────┘           
 SERA 참고 snapshot ────────────────────────────────────────────────└─ 매출복구 판단
 ```
 
+## DB 운영 방식 — 기존 Supabase 재사용
+
+HERO ITEM OS에서 쓰는 **동일한 Supabase `DATABASE_URL`을 그대로 재사용**합니다. 새 Supabase 프로젝트를 만들 필요가 없습니다.
+
+대신 DAILY REPORT는 PostgreSQL의 별도 schema를 사용합니다.
+
+```toml
+DATABASE_URL = "HERO ITEM OS의 기존 DATABASE_URL"
+DATABASE_SCHEMA = "daily_report"
+```
+
+따라서 HERO/CRM의 기존 테이블을 건드리지 않고 `daily_report.*` 테이블만 생성합니다. 상세 내용은 `docs/00_SHARED_SUPABASE_SCHEMA.md`를 참고하세요.
+
 ## GitHub / Streamlit 빠른 시작
 
 1. GitHub에 **Private** 저장소 `misharp-daily-report` 생성
 2. 이 레포 전체 업로드
-3. Supabase/PostgreSQL `DATABASE_URL` 준비
+3. HERO ITEM OS에서 사용 중인 Supabase `DATABASE_URL`을 그대로 복사하고 `DATABASE_SCHEMA=daily_report` 설정
 4. Streamlit Community Cloud에서 배포
    - Repository: `misharp-daily-report`
    - Branch: `main`

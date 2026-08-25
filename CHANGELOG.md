@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 3.1.0
+
+- HERO ITEM OS / CRM OS와 **같은 Supabase DATABASE_URL 재사용** 지원
+- MISHARP DAILY REPORT 전용 PostgreSQL schema 기본값 `daily_report` 추가
+- 모든 DAILY REPORT ORM 테이블을 `daily_report.*` 아래에 생성하여 다른 프로그램 테이블과 충돌 방지
+- 앱 시작 시 `CREATE SCHEMA IF NOT EXISTS daily_report` 자동 실행
+- migration 스크립트도 `daily_report` schema만 검사/수정하도록 변경
+- DB 미설정/초기화 실패 시 Streamlit redacted traceback 대신 Secrets 설정 안내 화면 표시
+- 데이터·설정 화면에 현재 DB schema 표시
+- `.env.example` / `secrets.toml.example`에 `DATABASE_SCHEMA` 추가
+
 ## 3.0.0
 
 - 프로그램명 `MISHARP DAILY REPORT`로 변경

@@ -22,11 +22,14 @@ def render() -> None:
     st.caption("Cafe24 Analytics를 공식 통계 원천으로 사용하고, 광고비·재고·앱·SERA 참고 데이터를 함께 연결합니다.")
 
     c1, c2, c3, c4 = st.columns(4)
-    db_label = "PostgreSQL" if str(s.database_url).startswith("postgresql") else "로컬 SQLite" if str(s.database_url).startswith("sqlite") else "미설정"
+    db_label = (f"PostgreSQL · {s.database_schema}" if str(s.database_url).startswith("postgresql") else "로컬 SQLite" if str(s.database_url).startswith("sqlite") else "미설정")
     c1.metric("DB", db_label)
     c2.metric("Cafe24 Mall", s.cafe24_mall_id or "미설정")
     c3.metric("Cafe24 토큰", "저장됨" if cafe24_token_saved else "없음")
     c4.metric("광고비 시트", "설정됨" if _is_set(s.google_service_account_json) else "미설정")
+
+    if str(s.database_url).startswith("postgresql"):
+        st.caption(f"DB 분리: 같은 Supabase를 사용하되 `{s.database_schema}` schema에만 DAILY REPORT 테이블을 저장합니다.")
 
     st.subheader("연동 상태")
     sync_status_bar()

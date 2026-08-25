@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from misharp.connectors.cafe24_oauth import exchange_code
-from misharp.db import init_db
+from misharp.db import DATABASE_SCHEMA, init_db
 from misharp.services.export_xlsx import multi_sheet_xlsx
 from misharp.services.query import daily_dataframe, inventory_dataframe, product_sales_dataframe
 from misharp.ui.common import sync_status_bar
@@ -19,8 +19,30 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-init_db()
 apply_style()
+render_brand()
+
+# DB 초기화 오류를 Streamlit의 redacted traceback으로 끝내지 않고,
+# 사용자가 Secrets에서 바로 수정할 수 있도록 안내합니다.
+try:
+    init_db()
+except Exception as exc:
+    st.error("데이터베이스 연결 준비가 필요합니다.")
+    st.markdown(
+        """
+**Streamlit → Manage app → Settings → Secrets**에 먼저 아래 두 값을 넣어주세요.
+
+```toml
+DATABASE_URL = "HERO ITEM OS에서 사용 중인 동일한 Supabase DATABASE_URL"
+DATABASE_SCHEMA = "daily_report"
+```
+
+`DATABASE_URL`은 HERO ITEM OS와 같아도 됩니다. DAILY REPORT는 PostgreSQL의 **daily_report 전용 schema**에만 테이블을 생성하므로 HERO/CRM 테이블과 섞이지 않습니다.
+        """
+    )
+    st.caption(f"DB 초기화 오류 유형: {type(exc).__name__}")
+    render_footer()
+    st.stop()
 
 # Cafe24 OAuth callback. callback 처리 후 query parameter를 비워 기본화면으로 복귀합니다.
 code = st.query_params.get("code")
@@ -70,7 +92,6 @@ page_key = str(raw_page or "daily")
 if page_key not in PAGE_MAP:
     page_key = "daily"
 
-render_brand()
 render_nav(NAV, page_key)
 if page_key != "settings":
     sync_status_bar()

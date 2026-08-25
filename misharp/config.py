@@ -44,6 +44,7 @@ def _float(name: str, default: float) -> float:
 class Settings:
     app_timezone: str
     database_url: str
+    database_schema: str
     token_encryption_key: str
 
     cafe24_mall_id: str
@@ -94,6 +95,7 @@ def get_settings() -> Settings:
     return Settings(
         app_timezone=_env("APP_TIMEZONE", "Asia/Seoul"),
         database_url=_env("DATABASE_URL", "sqlite:///misharp_daily_report.db"),
+        database_schema=_env("DATABASE_SCHEMA", "daily_report"),
         token_encryption_key=_env("TOKEN_ENCRYPTION_KEY"),
         cafe24_mall_id=_env("CAFE24_MALL_ID"),
         cafe24_client_id=_env("CAFE24_CLIENT_ID"),

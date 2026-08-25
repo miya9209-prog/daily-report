@@ -1,5 +1,9 @@
 # 미샵 데일리 리포트 — 전체 구축 가이드
 
+> **중요 — DB는 새로 만들지 않습니다.**  
+> HERO ITEM OS에서 이미 사용하는 Supabase `DATABASE_URL`을 그대로 재사용하고, DAILY REPORT만 `DATABASE_SCHEMA = "daily_report"`로 분리합니다. CRM OS V2처럼 같은 Supabase 프로젝트를 함께 써도 테이블은 섞이지 않습니다.
+
+
 이 문서는 개발 경험이 많지 않아도 **처음부터 실제 운영까지** 순서대로 따라갈 수 있도록 작성했습니다.
 
 ---
@@ -36,15 +40,18 @@ git push -u origin main
 
 ---
 
-# 2단계. PostgreSQL 준비
+# 2단계. HERO ITEM OS의 Supabase DB 재사용
 
-운영 DB는 PostgreSQL을 권장합니다. Supabase, Neon, AWS RDS 등 어느 서비스든 됩니다.
+새 Supabase 프로젝트를 만들지 않습니다. **HERO ITEM OS에서 현재 사용 중인 `DATABASE_URL`을 그대로 복사**합니다.
 
-필요한 것은 하나입니다.
+MISHARP DAILY REPORT에는 아래 두 값을 사용합니다.
 
 ```text
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/DATABASE
+DATABASE_URL=HERO_ITEM_OS와_동일한_값
+DATABASE_SCHEMA=daily_report
 ```
+
+같은 PostgreSQL 서버를 사용하지만 DAILY REPORT 테이블은 `daily_report` schema 안에만 생성됩니다. HERO ITEM OS 및 CRM OS의 기존 테이블은 건드리지 않습니다.
 
 처음 테스트만 할 때는 기본 SQLite도 동작합니다.
 
@@ -92,7 +99,7 @@ Cafe24 앱 등록 시 Redirect URI가 필요하므로 **Streamlit 주소를 먼�
 https://misharp-daily-report.streamlit.app/
 ```
 
-첫 배포에서는 DB/Cafe24 secret이 없어 경고가 나와도 괜찮습니다. URL 확보가 목적입니다.
+첫 배포에서 DB가 아직 없으면 앱은 빨간 traceback 대신 `DATABASE_URL / DATABASE_SCHEMA` 설정 안내 화면을 표시합니다. URL을 확보한 뒤 Secrets를 넣으면 됩니다.
 
 ---
 
@@ -250,6 +257,19 @@ IAPPS_DAILY_ENDPOINT=...
 
 ---
 
+# 10.5단계. HERO OS의 Supabase DB를 그대로 재사용
+
+1. HERO ITEM OS의 Streamlit 앱에서 **Manage app → Settings → Secrets**를 엽니다.
+2. `DATABASE_URL` 값을 복사합니다.
+3. MISHARP DAILY REPORT의 Streamlit Secrets에 같은 `DATABASE_URL`을 붙여넣습니다.
+4. 바로 아래에 다음 줄을 추가합니다.
+
+```toml
+DATABASE_SCHEMA = "daily_report"
+```
+
+이 레포는 PostgreSQL일 때 자동으로 `daily_report` schema를 만들고 모든 테이블을 그 안에 생성합니다. HERO/CRM 테이블은 수정하지 않습니다.
+
 # 11단계. Streamlit Secrets 입력
 
 Streamlit 앱 → Settings → Secrets에 필요한 값을 입력합니다.
@@ -258,6 +278,7 @@ Streamlit 앱 → Settings → Secrets에 필요한 값을 입력합니다.
 
 ```toml
 DATABASE_URL = "postgresql+psycopg://..."
+DATABASE_SCHEMA = "daily_report"
 TOKEN_ENCRYPTION_KEY = "..."
 CAFE24_MALL_ID = "miyawa"
 CAFE24_CLIENT_ID = "..."
@@ -281,6 +302,7 @@ Streamlit에 넣은 운영 Secret을 GitHub Actions에도 동일하게 넣습니
 특히:
 
 - DATABASE_URL
+- DATABASE_SCHEMA (`daily_report`)
 - TOKEN_ENCRYPTION_KEY
 - CAFE24_MALL_ID
 - CAFE24_CLIENT_ID
