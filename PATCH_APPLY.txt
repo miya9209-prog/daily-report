@@ -1,24 +1,12 @@
-MISHARP DAILY REPORT v3.2.4 — 전체 표 숫자 표시 통일
+MISHARP DAILY REPORT v3.2.6 — 숫자 오른쪽 정렬 강제 패치
 
-교체 파일:
+교체 파일 1개:
 - misharp/ui/common.py
-- misharp/ui/tabs/daily.py
-- misharp/ui/tabs/product_best.py
-- misharp/ui/tabs/inventory.py
-- misharp/ui/settings.py
 
-프로그램 전체 표 공통 규칙:
-1. 모든 숫자 셀 오른쪽 정렬
-2. 금액/건수/수량/방문/조회/재고 등: 1,000단위 콤마, 소수점 없음
-3. 전환율/광고비율/각종 비율: 소수점 둘째 자리
-4. 일평균 판매/필요일판매/의미 있는 소수값: 소수점 둘째 자리
-5. 자료 미수집: '자료없음'
-6. 전년도·전전년도 동일기간 비교:
-   - 실적행은 위 공통 규칙
-   - 증감행은 소수점 둘째 자리
-   - 일반 지표 증감은 % 표시
-   - 비율 지표 증감은 %p 표시
-7. 상단 핵심지표 숫자 90% 축소 설정 유지
-8. XLSX 다운로드 원본 숫자형 데이터는 변경하지 않음
+수정:
+- 숫자 셀 td에 inline style text-align:right !important
+- 숫자 셀 내부 div에도 inline style text-align:right !important
+- 숫자 셀 하위 요소까지 오른쪽 정렬 강제
+- 문자 셀은 왼쪽 정렬 유지
 
 DB/API/Secrets 변경 없음.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from zoneinfo import ZoneInfo
+import html
 
 import pandas as pd
 import streamlit as st
@@ -181,3 +182,167 @@ def daily_report_guide() -> None:
             """,
             unsafe_allow_html=True,
         )
+
+
+def _try_number(value):
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text or text == "자료없음":
+        return None
+    text = text.replace(",", "")
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def _format_report_cell(value, column_name: str, *, growth_row: bool = False):
+    if value is None or pd.isna(value):
+        return "자료없음", False
+
+    num = _try_number(value)
+    if num is None:
+        return str(value), False
+
+    if growth_row:
+        suffix = "%p" if _is_rate_col(column_name) else "%"
+        return f"{num:+,.2f}{suffix}", True
+
+    if _is_rate_col(column_name) or _is_force_decimal_col(column_name):
+        return f"{num:,.2f}", True
+
+    if _is_force_whole_col(column_name):
+        return f"{num:,.0f}", True
+
+    # 의미 있는 소수값은 2자리, 정수형 값은 소수점 없이
+    if abs(num - round(num)) > 1e-9:
+        return f"{num:,.2f}", True
+    return f"{num:,.0f}", True
+
+
+def render_report_table(
+    df: pd.DataFrame,
+    *,
+    comparison_mode: bool = False,
+    max_height: int = 620,
+) -> None:
+    """Streamlit grid 정렬 제약을 피하기 위한 DAILY REPORT 공통 HTML 표.
+
+    숫자 셀은 실제 HTML td에 text-align:right를 직접 적용하므로
+    일별/비교/상품/재고 표에서 항상 오른쪽 정렬된다.
+    """
+    if df is None or df.empty:
+        st.info("표시할 데이터가 없습니다.")
+        return
+
+    table = df.copy()
+
+    css = f"""
+    <style>
+      .mdr-table-wrap {{
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: auto;
+        max-height: {int(max_height)}px;
+        border: 1px solid #e6e8eb;
+        border-radius: 4px;
+        background: white;
+      }}
+      table.mdr-table {{
+        width: max-content;
+        min-width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 13px;
+        color: #262730;
+      }}
+      table.mdr-table thead th {{
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #f7f8fa;
+        color: #68707a;
+        font-weight: 500;
+        text-align: left;
+        white-space: nowrap;
+        padding: 9px 10px;
+        border-bottom: 1px solid #e6e8eb;
+        border-right: 1px solid #eceef1;
+      }}
+      table.mdr-table tbody td {{
+        white-space: nowrap;
+        padding: 9px 10px;
+        border-bottom: 1px solid #eceef1;
+        border-right: 1px solid #eceef1;
+        vertical-align: middle;
+        text-align: left;
+      }}
+      table.mdr-table tbody td.mdr-num {{
+        text-align: right !important;
+        font-variant-numeric: tabular-nums;
+      }}
+      table.mdr-table tbody tr:last-child td {{
+        border-bottom: 0;
+      }}
+      table.mdr-table th:last-child,
+      table.mdr-table td:last-child {{
+        border-right: 0;
+      }}
+    </style>
+    """
+
+    headers = "".join(
+        f"<th>{html.escape(str(col))}</th>"
+        for col in table.columns
+    )
+
+    body_rows = []
+    for idx, row in table.iterrows():
+        growth_row = False
+        if comparison_mode:
+            label = (
+                str(row.get("비교구분", ""))
+                if "비교구분" in table.columns
+                else str(idx)
+            )
+            growth_row = "증감" in label
+
+        cells = []
+        for col in table.columns:
+            value = row[col]
+            text, is_num = _format_report_cell(
+                value,
+                str(col),
+                growth_row=growth_row,
+            )
+            if is_num:
+                cells.append(
+                    '<td class="mdr-num" style="text-align:right !important;">'
+                    '<div style="display:block; width:100%; text-align:right !important; '
+                    'font-variant-numeric:tabular-nums;">'
+                    f'{html.escape(text)}'
+                    '</div></td>'
+                )
+            else:
+                cells.append(
+                    '<td style="text-align:left !important;">'
+                    f'{html.escape(text)}'
+                    '</td>'
+                )
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    markup = (
+        css
+        + '<div class="mdr-table-wrap">'
+        + '<table class="mdr-table">'
+        + f"<thead><tr>{headers}</tr></thead>"
+        + "<tbody>"
+        + "".join(body_rows)
+        + "</tbody></table></div>"
+    )
+    st.markdown(markup, unsafe_allow_html=True)
