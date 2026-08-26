@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import secrets
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
 
 from dateutil.parser import isoparse
@@ -78,10 +79,17 @@ def _load_token() -> dict:
 
 
 def _parse_expiry(value: str) -> datetime:
+    """Cafe24 expires_at을 UTC aware datetime으로 정규화한다.
+
+    Cafe24가 timezone 정보 없이 expires_at을 반환하는 경우가 있는데,
+    miyawa 쇼핑몰 기준 로컬시간(Asia/Seoul)으로 해석해야 한다.
+    이를 UTC로 잘못 해석하면 이미 만료된 Access Token을 수 시간 더
+    유효하다고 판단하여 GitHub Actions에서 401이 발생한다.
+    """
     dt = isoparse(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+        dt = dt.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    return dt.astimezone(timezone.utc)
 
 
 def refresh_token(refresh_token_value: str) -> dict:
@@ -105,10 +113,29 @@ def refresh_token(refresh_token_value: str) -> dict:
     return payload
 
 
-def get_valid_access_token() -> str:
+def get_valid_access_token(*, force_refresh: bool = False) -> str:
+    """사용 가능한 Access Token을 반환하고 필요하면 자동 갱신한다.
+
+    force_refresh=True는 Cafe24 API가 실제로 401을 반환했을 때 사용한다.
+    저장된 만료시각이 잘못되었거나 서버에서 토큰을 조기 무효화한 경우에도
+    Refresh Token으로 한 번 강제 갱신할 수 있다.
+    """
     payload = _load_token()
-    expires_at = _parse_expiry(payload["expires_at"])
-    now = datetime.now(timezone.utc)
-    if now >= expires_at - timedelta(minutes=5):
-        payload = refresh_token(payload["refresh_token"])
+
+    if force_refresh:
+        refresh = payload.get("refresh_token")
+        if not refresh:
+            return payload["access_token"]
+        payload = refresh_token(refresh)
+        return payload["access_token"]
+
+    expires_raw = payload.get("expires_at")
+    if expires_raw:
+        expires_at = _parse_expiry(expires_raw)
+        now = datetime.now(timezone.utc)
+        if now >= expires_at - timedelta(minutes=5):
+            refresh = payload.get("refresh_token")
+            if refresh:
+                payload = refresh_token(refresh)
+
     return payload["access_token"]

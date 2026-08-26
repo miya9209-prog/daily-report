@@ -46,8 +46,22 @@ class Cafe24AnalyticsClient:
         offset = 0
         while True:
             req = {**base_params, "limit": min(limit, 1000), "offset": offset}
-            headers = {"Authorization": f"Bearer {get_valid_access_token()}"}
+            token = get_valid_access_token()
+            headers = {"Authorization": f"Bearer {token}"}
             response = self.http.get(f"{self.base_url}{path}", headers=headers, params=req, timeout=40)
+
+            # 저장된 만료시각보다 서버가 먼저 토큰을 무효화하는 경우까지 대응한다.
+            # 401이면 Refresh Token으로 Access Token을 강제 갱신하고 딱 한 번 재시도한다.
+            if response.status_code == 401:
+                token = get_valid_access_token(force_refresh=True)
+                headers = {"Authorization": f"Bearer {token}"}
+                response = self.http.get(
+                    f"{self.base_url}{path}",
+                    headers=headers,
+                    params=req,
+                    timeout=40,
+                )
+
             if response.status_code == 429:
                 polite_pause(2.2)
                 continue

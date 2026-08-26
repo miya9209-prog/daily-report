@@ -1,12 +1,14 @@
-MISHARP DAILY REPORT v3.2 PATCH
+MISHARP DAILY REPORT v3.2.1 — Cafe24 토큰 자동갱신 수정
 
-현재 v3.1이 정상 배포되어 있는 경우 아래 5개 파일만 기존 GitHub 레포에 같은 경로로 덮어쓰면 됩니다.
+교체 파일 2개:
+1) misharp/connectors/cafe24_oauth.py
+2) misharp/connectors/cafe24_analytics.py
 
-- misharp/ui/settings.py
-- scripts/sync_all.py
-- VERSION
-- CHANGELOG.md
-- SETUP_GUIDE_KO.md
+수정 내용:
+- Cafe24 timezone 없는 expires_at을 Asia/Seoul로 해석
+- Access Token 만료 5분 전 Refresh Token으로 자동 갱신
+- Analytics API가 401을 반환하면 강제 refresh 후 1회 자동 재시도
 
-GitHub에 깨진 이름의 00_...md 파일이 이미 생겼다면 그 파일만 삭제하세요.
-정상 파일명은 00_먼저읽기.md 입니다.
+기존 Streamlit/GitHub Secrets는 변경하지 않습니다.
+Cafe24 OAuth 재승인도 우선 필요하지 않습니다.
+교체 후 GitHub Actions → MISHARP data sync → Run workflow(days=1) 실행하세요.
