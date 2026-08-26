@@ -47,6 +47,24 @@ SELLMATE_ALIASES = {
     ),
 }
 
+SELLMATE_SHIPPING_ALIASES = {
+    "shipping_count": _alias_set(
+        "당일발송수량", "당일 발송수량", "발송수량", "발송 수량",
+        "발송건수", "출고수량", "출고 수량", "출고건수",
+        "택배수량", "택배 수량", "택배건수",
+        "송장수량", "송장 수량", "송장건수", "배송건수",
+        "shipping_count", "shipment_count", "dispatch_count",
+    ),
+    "tracking_no": _alias_set(
+        "운송장번호", "운송장 번호", "송장번호", "송장 번호",
+        "택배송장번호", "tracking_no", "trackingnumber", "invoice_no",
+    ),
+    "order_no": _alias_set(
+        "주문번호", "주문 번호", "쇼핑몰주문번호", "몰주문번호",
+        "order_no", "orderno", "shop_order_no",
+    ),
+}
+
 IAPPS_ALIASES = {
     "date": _alias_set("일자", "날짜", "기준일", "date", "ymd", "통계일", "통계일자"),
     "app_installs": _alias_set(
@@ -330,6 +348,124 @@ def import_iapps_daily(data: bytes, filename: str) -> int:
                 count += 1
             finish_sync_run(db, run, "success", rows_written=count, message=filename)
             return count
+        except Exception as exc:
+            finish_sync_run(db, run, "failed", message=str(exc))
+            raise
+
+
+def preview_sellmate_shipping(
+    data: bytes,
+    filename: str,
+    shipping_date: date,
+) -> tuple[pd.DataFrame, dict[str, str | None], str]:
+    """Sellmate 당일 발송 Excel을 읽어 선택한 날짜의 택배수량 1건으로 요약한다.
+
+    우선순위:
+    1) 발송수량/출고수량/택배수량 등 명시적 수량 컬럼 합계
+    2) 운송장번호 고유 개수
+    3) 주문번호 고유 개수
+
+    일반 '수량' 컬럼은 상품수량일 수 있어 자동 사용하지 않는다.
+    """
+    parsed = _parse_with_aliases(
+        data,
+        filename,
+        SELLMATE_SHIPPING_ALIASES,
+        required_sets=[
+            {"shipping_count"},
+            {"tracking_no"},
+            {"order_no"},
+        ],
+    )
+    m = parsed.mapping
+
+    method = ""
+    count: int | None = None
+
+    if m.get("shipping_count"):
+        values = [
+            _to_int(v)
+            for v in parsed.frame[m["shipping_count"]].tolist()
+        ]
+        values = [v for v in values if v is not None]
+        if values:
+            count = int(sum(values))
+            method = f"{m['shipping_count']} 합계"
+
+    if count is None and m.get("tracking_no"):
+        values = (
+            parsed.frame[m["tracking_no"]]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        values = values[values.ne("") & values.ne("-")]
+        if not values.empty:
+            count = int(values.nunique())
+            method = f"{m['tracking_no']} 고유건수"
+
+    if count is None and m.get("order_no"):
+        values = (
+            parsed.frame[m["order_no"]]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        values = values[values.ne("") & values.ne("-")]
+        if not values.empty:
+            count = int(values.nunique())
+            method = f"{m['order_no']} 고유건수"
+
+    if count is None:
+        raise ValueError(
+            "발송수량/운송장번호/주문번호 중 집계 가능한 컬럼을 찾지 못했습니다. "
+            "실제 Sellmate 발송 Excel 샘플을 기준으로 헤더 별칭을 보완해주세요."
+        )
+
+    preview = pd.DataFrame(
+        [{
+            "날짜": shipping_date,
+            "택배수량": count,
+            "집계방식": method,
+        }]
+    )
+    return preview, m, parsed.sheet_name
+
+
+def import_sellmate_shipping(
+    data: bytes,
+    filename: str,
+    shipping_date: date,
+) -> int:
+    preview, _, _ = preview_sellmate_shipping(data, filename, shipping_date)
+    shipping_count = _to_int(preview.iloc[0]["택배수량"])
+    method = str(preview.iloc[0]["집계방식"])
+
+    with session_scope() as db:
+        run = start_sync_run(db, "sellmate_shipping_excel")
+        try:
+            row = upsert_daily(
+                db,
+                shipping_date,
+                shipping_count=shipping_count,
+            )
+            sources = dict(row.sources or {})
+            sources["sellmate_shipping_excel"] = {
+                "file": filename,
+                "method": method,
+            }
+            row.sources = sources
+            finish_sync_run(
+                db,
+                run,
+                "success",
+                rows_written=1,
+                message=(
+                    f"{filename} / {shipping_date.isoformat()} / "
+                    f"택배수량 {shipping_count:,} / {method}"
+                ),
+            )
+            return int(shipping_count or 0)
         except Exception as exc:
             finish_sync_run(db, run, "failed", message=str(exc))
             raise

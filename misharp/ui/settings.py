@@ -16,7 +16,12 @@ from ..services.sync_daily import sync_cafe24_daily
 from ..services.sync_hourly import sync_hourly
 from ..services.sync_products import sync_product_sales
 from ..importers.manual_excel import (
-    import_iapps_daily, import_sellmate_inventory, preview_iapps_daily, preview_sellmate_inventory,
+    import_iapps_daily,
+    import_sellmate_inventory,
+    import_sellmate_shipping,
+    preview_iapps_daily,
+    preview_sellmate_inventory,
+    preview_sellmate_shipping,
 )
 from ..importers.legacy_daily import import_legacy_daily, preview_legacy_daily
 from .common import daily_report_guide, sync_status_bar, styled_numeric_table, render_report_table
@@ -220,82 +225,265 @@ def render() -> None:
                         st.error(f"오늘 Cafe24 데이터 수집 실패: {exc}")
 
     st.subheader("2. 수동 데이터 업로드")
-    st.caption("Sellmate와 iApps는 관리자에서 Excel을 내려받아 필요할 때 업로드합니다. 같은 기준일을 다시 올리면 DB 값을 교체합니다.")
+    st.caption(
+        "Sellmate는 실제 재고와 당일 발송수량 파일이 서로 다르므로 업로드를 2개로 분리합니다. "
+        "iApps도 관리자 Excel을 필요할 때 업로드합니다."
+    )
     st.info(
-        "이제 Sellmate와 iApps는 파일을 선택하는 즉시 PostgreSQL DB에 저장합니다. "
-        "같은 파일이 화면 재실행 때문에 반복 저장되지 않도록 파일내용 기준으로 1회만 처리합니다. "
-        "페이지를 이동하면 파일 선택창은 비어 보일 수 있지만, 저장된 데이터와 최근 DB 반영 이력은 그대로 남습니다."
+        "Sellmate 재고 / Sellmate 당일 발송 / iApps 통계는 파일을 선택하는 즉시 PostgreSQL DB에 저장합니다. "
+        "페이지를 이동하면 파일 선택창은 비어 보일 수 있지만 DB 저장값과 최근 반영 이력은 유지됩니다."
     )
 
-    left, right = st.columns(2)
+    st.markdown("### Sellmate")
 
-    with left:
-        st.markdown("#### Sellmate 실제 재고 Excel")
-        st.caption("Cafe24 재고는 사용하지 않습니다. Sellmate 실제 재고 파일만 기준으로 저장합니다.")
-        _render_manual_upload_status(sync_map.get("sellmate_excel"), "Sellmate 실제 재고")
-        inv_date = st.date_input("재고 기준일", value=_local_today(), key="sellmate_inventory_date")
-        inv_file = st.file_uploader("Sellmate 재고 파일", type=["xlsx", "xls", "csv"], key="sellmate_inventory_file")
+    sell_left, sell_right = st.columns(2)
+
+    with sell_left:
+        st.markdown("#### ① 실제 재고 Excel")
+        st.caption(
+            "Cafe24 재고는 실제 수량이 아니므로 사용하지 않습니다. "
+            "Sellmate에서 내려받은 실제 재고 파일만 재고 기준으로 저장합니다."
+        )
+        _render_manual_upload_status(
+            sync_map.get("sellmate_excel"),
+            "Sellmate 실제 재고",
+        )
+        inv_date = st.date_input(
+            "재고 기준일",
+            value=_local_today(),
+            key="sellmate_inventory_date",
+        )
+        inv_file = st.file_uploader(
+            "Sellmate 실제 재고 파일",
+            type=["xlsx", "xls", "csv"],
+            key="sellmate_inventory_file",
+        )
+
         if inv_file is not None:
             inv_bytes = inv_file.getvalue()
             try:
-                preview, mapping, sheet = preview_sellmate_inventory(inv_bytes, inv_file.name)
-                st.caption(f"인식 시트: {sheet} · {len(preview):,}행")
-                st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
-                render_report_table(preview.head(10), max_height=360)
+                preview, mapping, sheet = preview_sellmate_inventory(
+                    inv_bytes,
+                    inv_file.name,
+                )
+                st.caption(
+                    f"인식 시트: {sheet} · {len(preview):,}행"
+                )
+                st.code(
+                    " / ".join(
+                        f"{k}={v or '-'}"
+                        for k, v in mapping.items()
+                    ),
+                    language=None,
+                )
+                render_report_table(
+                    preview.head(10),
+                    max_height=340,
+                )
 
-                sig = _upload_signature(inv_bytes, inv_date)
+                sig = _upload_signature(
+                    inv_bytes,
+                    inv_date,
+                )
                 if st.session_state.get("sellmate_saved_sig") != sig:
-                    with st.spinner("Sellmate 실제 재고를 DB에 저장하고 있습니다..."):
-                        count = import_sellmate_inventory(inv_bytes, inv_file.name, inv_date)
+                    with st.spinner(
+                        "Sellmate 실제 재고를 DB에 저장하고 있습니다..."
+                    ):
+                        count = import_sellmate_inventory(
+                            inv_bytes,
+                            inv_file.name,
+                            inv_date,
+                        )
                     st.session_state["sellmate_saved_sig"] = sig
-                    st.success(f"{inv_date} 실제 재고 {count:,}행 DB 저장 완료")
+                    st.success(
+                        f"{inv_date} 실제 재고 {count:,}행 DB 저장 완료"
+                    )
 
                 check = inventory_dataframe(inv_date)
                 if not check.empty:
-                    st.caption(f"DB 재조회 확인: {len(check):,}행")
-                    render_report_table(check.head(10), max_height=320)
+                    st.caption(
+                        f"DB 재조회 확인: {len(check):,}행"
+                    )
+                    render_report_table(
+                        check.head(10),
+                        max_height=300,
+                    )
             except Exception as exc:
-                st.error(f"Sellmate 파일 인식/저장 실패: {exc}")
+                st.error(
+                    f"Sellmate 재고 파일 인식/저장 실패: {exc}"
+                )
 
-    with right:
-        st.markdown("#### iApps 일별 통계 Excel")
-        st.caption("일별 앱 설치수·앱 순방문(DAU)을 날짜 기준으로 덮어씁니다.")
-        _render_manual_upload_status(sync_map.get("iapps_excel"), "iApps 일별 통계")
-        app_file = st.file_uploader("iApps 통계 파일", type=["xlsx", "xls", "csv"], key="iapps_daily_file")
-        if app_file is not None:
-            app_bytes = app_file.getvalue()
+    with sell_right:
+        st.markdown("#### ② 당일 발송수량 Excel")
+        st.caption(
+            "Sellmate에서 내려받은 당일 발송 파일을 올리면 "
+            "일별 종합통계의 '택배수량'에 저장합니다."
+        )
+        _render_manual_upload_status(
+            sync_map.get("sellmate_shipping_excel"),
+            "Sellmate 당일 발송",
+        )
+        ship_date = st.date_input(
+            "발송 기준일",
+            value=_local_today(),
+            key="sellmate_shipping_date",
+        )
+        ship_file = st.file_uploader(
+            "Sellmate 당일 발송 파일",
+            type=["xlsx", "xls", "csv"],
+            key="sellmate_shipping_file",
+        )
+
+        if ship_file is not None:
+            ship_bytes = ship_file.getvalue()
             try:
-                preview, mapping, sheet = preview_iapps_daily(app_bytes, app_file.name)
-                st.caption(f"인식 시트: {sheet} · {len(preview):,}일")
-                st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
-                render_report_table(preview.head(14), max_height=360)
+                preview, mapping, sheet = preview_sellmate_shipping(
+                    ship_bytes,
+                    ship_file.name,
+                    ship_date,
+                )
+                st.caption(
+                    f"인식 시트: {sheet}"
+                )
+                st.code(
+                    " / ".join(
+                        f"{k}={v or '-'}"
+                        for k, v in mapping.items()
+                    ),
+                    language=None,
+                )
+                render_report_table(
+                    preview,
+                    max_height=220,
+                )
 
-                sig = _upload_signature(app_bytes)
-                if st.session_state.get("iapps_saved_sig") != sig:
-                    with st.spinner("iApps 일별 통계를 DB에 저장하고 있습니다..."):
-                        count = import_iapps_daily(app_bytes, app_file.name)
-                    st.session_state["iapps_saved_sig"] = sig
-                    st.success(f"iApps 일별 통계 {count:,}일 DB 저장 완료")
+                sig = _upload_signature(
+                    ship_bytes,
+                    ship_date,
+                )
+                if st.session_state.get(
+                    "sellmate_shipping_saved_sig"
+                ) != sig:
+                    with st.spinner(
+                        "Sellmate 당일 발송수량을 DB에 저장하고 있습니다..."
+                    ):
+                        shipping_count = import_sellmate_shipping(
+                            ship_bytes,
+                            ship_file.name,
+                            ship_date,
+                        )
+                    st.session_state[
+                        "sellmate_shipping_saved_sig"
+                    ] = sig
+                    st.success(
+                        f"{ship_date} 택배수량 {shipping_count:,}건 DB 저장 완료"
+                    )
 
-                app_start = preview["날짜"].min()
-                app_end = preview["날짜"].max()
-                check = daily_dataframe(app_start, app_end)
+                check = daily_dataframe(
+                    ship_date,
+                    ship_date,
+                )
                 if not check.empty:
-                    app_cols = [c for c in ["날짜", "앱 설치수", "앱 순방문"] if c in check.columns]
-                    verify = check[app_cols].copy()
-                    populated = verify[["앱 설치수", "앱 순방문"]].notna().any(axis=1).sum()
-                    if populated:
-                        st.success(
-                            f"DB 재조회 확인: {app_start} ~ {app_end} 중 앱 통계가 저장된 날짜 {int(populated):,}일"
-                        )
-                        render_report_table(verify.tail(14), max_height=360)
-                    else:
-                        st.error(
-                            "파일은 읽었지만 DB 재조회 결과 앱 설치수/앱 순방문이 비어 있습니다. "
-                            "이 경우 파일 컬럼 형식을 기준으로 importer를 추가 보완해야 합니다."
-                        )
+                    cols = [
+                        c
+                        for c in ["날짜", "택배수량"]
+                        if c in check.columns
+                    ]
+                    st.caption(
+                        "DB 재조회 확인"
+                    )
+                    render_report_table(
+                        check[cols],
+                        max_height=220,
+                    )
             except Exception as exc:
-                st.error(f"iApps 파일 인식/저장 실패: {exc}")
+                st.error(
+                    f"Sellmate 발송 파일 인식/저장 실패: {exc}"
+                )
+
+    st.markdown("### iApps")
+    st.caption(
+        "일별 앱 설치수·앱 순방문(DAU)을 날짜 기준으로 저장합니다."
+    )
+    _render_manual_upload_status(
+        sync_map.get("iapps_excel"),
+        "iApps 일별 통계",
+    )
+    app_file = st.file_uploader(
+        "iApps 통계 파일",
+        type=["xlsx", "xls", "csv"],
+        key="iapps_daily_file",
+    )
+    if app_file is not None:
+        app_bytes = app_file.getvalue()
+        try:
+            preview, mapping, sheet = preview_iapps_daily(
+                app_bytes,
+                app_file.name,
+            )
+            st.caption(
+                f"인식 시트: {sheet} · {len(preview):,}일"
+            )
+            st.code(
+                " / ".join(
+                    f"{k}={v or '-'}"
+                    for k, v in mapping.items()
+                ),
+                language=None,
+            )
+            render_report_table(
+                preview.head(14),
+                max_height=340,
+            )
+
+            sig = _upload_signature(app_bytes)
+            if st.session_state.get("iapps_saved_sig") != sig:
+                with st.spinner(
+                    "iApps 일별 통계를 DB에 저장하고 있습니다..."
+                ):
+                    count = import_iapps_daily(
+                        app_bytes,
+                        app_file.name,
+                    )
+                st.session_state["iapps_saved_sig"] = sig
+                st.success(
+                    f"iApps 일별 통계 {count:,}일 DB 저장 완료"
+                )
+
+            app_start = preview["날짜"].min()
+            app_end = preview["날짜"].max()
+            check = daily_dataframe(
+                app_start,
+                app_end,
+            )
+            if not check.empty:
+                app_cols = [
+                    c
+                    for c in ["날짜", "앱 설치수", "앱 순방문"]
+                    if c in check.columns
+                ]
+                verify = check[app_cols].copy()
+                populated = verify[
+                    ["앱 설치수", "앱 순방문"]
+                ].notna().any(axis=1).sum()
+                if populated:
+                    st.success(
+                        f"DB 재조회 확인: {app_start} ~ {app_end} 중 "
+                        f"앱 통계 저장 날짜 {int(populated):,}일"
+                    )
+                    render_report_table(
+                        verify.tail(14),
+                        max_height=340,
+                    )
+                else:
+                    st.error(
+                        "파일은 읽었지만 DB 재조회 결과 앱 설치수/앱 순방문이 비어 있습니다. "
+                        "실제 iApps 파일 헤더를 기준으로 importer 보완이 필요합니다."
+                    )
+        except Exception as exc:
+            st.error(
+                f"iApps 파일 인식/저장 실패: {exc}"
+            )
 
     st.subheader("3. 과거·누락 데이터 채우기")
     st.caption("현재 월 누락분은 GitHub Actions의 MISHARP backfill로 채우고, 전년도·전전년도는 기존 일일보고 Excel을 최초 1회 업로드합니다.")
@@ -335,11 +523,13 @@ def render() -> None:
 
     st.subheader("4. 데이터 운영 상태")
     sellmate_run = sync_map.get("sellmate_excel")
+    sellmate_shipping_run = sync_map.get("sellmate_shipping_excel")
     iapps_run = sync_map.get("iapps_excel")
     rows = [
         {"데이터": "Cafe24 매출·유입·상품", "방식": "API 자동수집", "상태": "정상" if cafe24_token_saved else "인증 필요"},
         {"데이터": "Google 광고비", "방식": "GitHub Actions 자동수집", "상태": "정상" if google_ok else "미수집"},
         {"데이터": "Sellmate 실제 재고", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_run else "첫 업로드 필요"},
+        {"데이터": "Sellmate 당일 발송수량", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_shipping_run else "첫 업로드 필요"},
         {"데이터": "iApps 앱 통계", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if iapps_run else "첫 업로드 필요"},
         {"데이터": "SERA", "방식": "참고용", "상태": "필요 시 업로드"},
     ]
@@ -350,7 +540,8 @@ def render() -> None:
         """
 - **공식 매출·유입·상품 성과:** Cafe24 Analytics API 자동수집
 - **일별 광고비:** 지정 Google Sheet → GitHub Actions 자동수집
-- **실제 재고:** Sellmate Excel 수동업로드. **Cafe24 재고수량은 사용하지 않음**
+- **실제 재고:** Sellmate 실제 재고 Excel 수동업로드. **Cafe24 재고수량은 사용하지 않음**
+- **택배수량:** Sellmate 당일 발송 Excel 수동업로드
 - **앱 설치·앱 순방문:** iApps Excel 수동업로드
 - **같은 기준일 재업로드:** 기존 DB 값을 교체하여 중복 누적하지 않음
 - **SERA:** 실시간 참고·교차검증용. 공식 집계와 혼합하지 않음

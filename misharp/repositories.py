@@ -121,7 +121,7 @@ def finish_sync_run(session, run: SyncRun, status: str, rows_written: int = 0, m
 def latest_sync_runs(session) -> list[SyncRun]:
     sources = [
         "cafe24_daily", "cafe24_products", "cafe24_hourly", "google_adsheet",
-        "sellmate", "iapps", "sellmate_excel", "iapps_excel", "legacy_excel", "sera_reference",
+        "sellmate", "iapps", "sellmate_excel", "sellmate_shipping_excel", "iapps_excel", "legacy_excel", "sera_reference",
     ]
     rows = []
     for source in sources:

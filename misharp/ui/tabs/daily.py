@@ -8,7 +8,7 @@ import streamlit as st
 from ...services.comparison import aggregate_range, comparison_dataframe
 from ...services.export_xlsx import multi_sheet_xlsx
 from ...services.query import alerts_dataframe, daily_dataframe, hourly_dataframe
-from ..common import display_missing, styled_numeric_table
+from ..common import display_missing, styled_numeric_table, render_report_table
 
 
 def _fmt_money(v):
@@ -158,31 +158,27 @@ def render(start: date, end: date) -> None:
         c.metric(label, val)
 
     if not alerts.empty:
-        st.subheader("대표 경보")
-        for _, r in alerts.head(8).iterrows():
-            icon = (
-                "🔴"
-                if r["등급"] == "danger"
-                else "🟠"
-                if r["등급"] == "warning"
-                else "🔵"
-            )
-            st.info(f"{icon} **{r['제목']}** — {r['내용']}")
+        # 경보는 화면을 차지하지 않도록 가장 중요한 1건만 한 줄로 표시합니다.
+        priority = {"danger": 0, "warning": 1, "info": 2}
+        one = alerts.copy()
+        one["_priority"] = one["등급"].map(priority).fillna(9)
+        one = one.sort_values(["_priority"], kind="stable").iloc[0]
+
+        icon = (
+            "🔴"
+            if one["등급"] == "danger"
+            else "🟠"
+            if one["등급"] == "warning"
+            else "🔵"
+        )
+        st.caption(f"{icon} {one['제목']} · {one['내용']}")
 
     st.subheader("일별 통계")
-    st.dataframe(
-        styled_numeric_table(df),
-        use_container_width=True,
-        hide_index=True,
-    )
+    render_report_table(df)
 
     if not hourly.empty:
         with st.expander("시간대별 매출·주문·방문 보기", expanded=False):
-            st.dataframe(
-                styled_numeric_table(hourly),
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_report_table(hourly, max_height=520)
             if start == end and "시간" in hourly and "매출" in hourly:
                 chart = hourly.set_index("시간")[["매출"]].apply(
                     pd.to_numeric, errors="coerce"
@@ -192,11 +188,7 @@ def render(start: date, end: date) -> None:
     st.divider()
     st.subheader("전년도 · 전전년도 동일기간 비교")
     comp_display = comp.reset_index().rename(columns={"index": "비교구분"})
-    st.dataframe(
-        styled_numeric_table(comp_display, comparison_mode=True),
-        use_container_width=True,
-        hide_index=True,
-    )
+    render_report_table(comp_display, comparison_mode=True)
     st.caption(
         "전환율·광고비율·퍼널 비율의 비교행은 %p 차이, "
         "금액·건수·방문 등은 증감률(%)입니다."
