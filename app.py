@@ -58,9 +58,11 @@ if code and state:
 
 def page_daily() -> None:
     st.title("일별 종합통계")
-    st.caption("매출 · 유입 · 전환 · 광고비를 기간별로 보고, 전년·전전년 동일기간과 비교합니다.")
-    start, end = date_range_selector()
-    daily.render(start, end)
+    st.caption(
+        "오늘의 핵심지표는 당일 기준으로 고정하고, "
+        "아래 조회기간에 따라 기간별 통계와 전년·전전년 동일기간을 비교합니다."
+    )
+    daily.render()
 
 
 def page_product_best() -> None:
