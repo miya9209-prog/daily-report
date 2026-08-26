@@ -14,7 +14,7 @@ from ..services.query import daily_dataframe
 from ..services.sync_daily import sync_cafe24_daily
 from ..services.sync_hourly import sync_hourly
 from ..services.sync_products import sync_product_sales
-from .common import daily_report_guide, sync_status_bar
+from .common import daily_report_guide, sync_status_bar, styled_numeric_table
 
 
 def _is_set(value: str) -> bool:
@@ -155,7 +155,7 @@ def render() -> None:
                         )
                         df = daily_dataframe(yesterday, yesterday)
                         if not df.empty:
-                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            st.dataframe(styled_numeric_table(df), use_container_width=True, hide_index=True)
                     except Exception as exc:
                         st.error(f"어제 Cafe24 데이터 수집 실패: {exc}")
 
@@ -168,7 +168,7 @@ def render() -> None:
                         )
                         df = daily_dataframe(today, today)
                         if not df.empty:
-                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            st.dataframe(styled_numeric_table(df), use_container_width=True, hide_index=True)
                         st.info("오늘 데이터는 진행 중 집계입니다. 다음 자동수집에서 같은 날짜가 다시 갱신됩니다.")
                     except Exception as exc:
                         st.error(f"오늘 Cafe24 데이터 수집 실패: {exc}")

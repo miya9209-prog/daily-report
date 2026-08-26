@@ -14,6 +14,129 @@ def display_missing(df: pd.DataFrame) -> pd.DataFrame:
     return df.astype(object).where(pd.notna(df), "자료없음")
 
 
+_RATE_HINTS = (
+    "%", "율", "비율", "전환", "ROAS", "CTR", "CVR",
+    "OpV", "ESpV", "달성률",
+)
+_FORCE_WHOLE_HINTS = (
+    "매출", "실결제", "광고비", "객단가", "주문", "건수", "수량",
+    "방문", "조회", "장바구니", "재고", "판매", "회원가입", "설치수",
+    "페이지뷰", "순위", "시간", "시즌남은일",
+)
+_FORCE_DECIMAL_HINTS = (
+    "일평균", "필요일판매", "예상 소진일",
+)
+
+
+def _is_rate_col(name: str) -> bool:
+    label = str(name)
+    return any(h in label for h in _RATE_HINTS)
+
+
+def _is_force_decimal_col(name: str) -> bool:
+    label = str(name)
+    return any(h in label for h in _FORCE_DECIMAL_HINTS)
+
+
+def _is_force_whole_col(name: str) -> bool:
+    label = str(name)
+    if _is_rate_col(label) or _is_force_decimal_col(label):
+        return False
+    return any(h in label for h in _FORCE_WHOLE_HINTS)
+
+
+def _numeric_columns(df: pd.DataFrame) -> list[str]:
+    cols: list[str] = []
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_numeric_dtype(s):
+            cols.append(col)
+            continue
+        # object dtype라도 실제 값 대부분이 숫자이면 숫자 열로 처리
+        non_null = s.dropna()
+        if non_null.empty:
+            continue
+        converted = pd.to_numeric(non_null, errors="coerce")
+        if converted.notna().all():
+            cols.append(col)
+    return cols
+
+
+def _column_needs_decimals(series: pd.Series, column_name: str) -> bool:
+    if _is_rate_col(column_name) or _is_force_decimal_col(column_name):
+        return True
+    if _is_force_whole_col(column_name):
+        return False
+
+    nums = pd.to_numeric(series, errors="coerce").dropna()
+    if nums.empty:
+        return False
+    # 실제 소수값이 존재하는 일반 숫자 열은 2자리까지 표시
+    return bool(((nums - nums.round()).abs() > 1e-9).any())
+
+
+def styled_numeric_table(
+    df: pd.DataFrame,
+    *,
+    comparison_mode: bool = False,
+):
+    """MISHARP DAILY REPORT 공통 표 표시 규칙.
+
+    - 모든 숫자 셀: 오른쪽 정렬
+    - 금액/건수/수량 등: 1,000단위 콤마 + 소수점 없음
+    - 비율/전환율 및 의미 있는 소수값: 소수점 둘째 자리
+    - 결측값: 자료없음
+    - comparison_mode=True이면 '증감' 행은 전부 소수점 둘째 자리로 표시
+      (비율열은 %p, 나머지는 %)
+    """
+    if df is None or df.empty:
+        return df
+
+    raw = df.copy()
+    numeric_cols = _numeric_columns(raw)
+    out = raw.copy()
+
+    growth_rows: set = set()
+    if comparison_mode:
+        for idx in out.index:
+            label = str(out.at[idx, "비교구분"]) if "비교구분" in out.columns else str(idx)
+            if "증감" in label:
+                growth_rows.add(idx)
+
+    for col in numeric_cols:
+        decimals = _column_needs_decimals(raw[col], col)
+
+        def _fmt(v, *, _col=col, _decimals=decimals, _idx=None):
+            if v is None or pd.isna(v):
+                return "자료없음"
+            num = float(v)
+            if comparison_mode and _idx in growth_rows:
+                suffix = "%p" if _is_rate_col(_col) else "%"
+                return f"{num:+,.2f}{suffix}"
+            return f"{num:,.2f}" if _decimals else f"{num:,.0f}"
+
+        # row index가 필요한 comparison_mode는 list comprehension으로 처리
+        if comparison_mode:
+            out[col] = [
+                _fmt(v, _idx=idx) for idx, v in zip(out.index, out[col].tolist())
+            ]
+        else:
+            out[col] = out[col].map(lambda v: _fmt(v))
+
+    # 숫자열 외 결측값도 자료없음으로 통일
+    for col in out.columns:
+        if col not in numeric_cols:
+            out[col] = out[col].astype(object).where(pd.notna(out[col]), "자료없음")
+
+    styler = out.style
+    if numeric_cols:
+        styler = styler.set_properties(
+            subset=pd.IndexSlice[:, numeric_cols],
+            **{"text-align": "right"},
+        )
+    return styler
+
+
 def sync_status_bar() -> None:
     with session_scope() as db:
         rows = latest_sync_runs(db)

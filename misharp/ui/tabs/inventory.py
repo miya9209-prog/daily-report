@@ -8,7 +8,7 @@ import streamlit as st
 from ...config import get_settings
 from ...services.export_xlsx import dataframe_to_xlsx
 from ...services.query import inventory_dataframe
-from ..common import display_missing
+from ..common import styled_numeric_table
 
 
 def _default_season_end(end: date) -> date:
@@ -33,6 +33,6 @@ def render(_: date, end: date) -> None:
     if status: view = view[view["재고상태"].isin(status)]
     view = view.sort_values(sort_col, ascending=(sort_col in ["소진속도달성률(%)", "최근30일 판매"]), na_position="last")
     view.insert(0, "순위", range(1, len(view)+1))
-    st.dataframe(display_missing(view), use_container_width=True, hide_index=True)
+    st.dataframe(styled_numeric_table(view), use_container_width=True, hide_index=True)
     st.download_button("주요 재고 현황 XLSX 다운로드", data=dataframe_to_xlsx(view, "주요재고현황"),
         file_name=f"미샵_주요재고현황_{end:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

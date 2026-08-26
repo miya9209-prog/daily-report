@@ -7,7 +7,7 @@ import streamlit as st
 
 from ...services.export_xlsx import dataframe_to_xlsx
 from ...services.query import product_sales_dataframe
-from ..common import display_missing
+from ..common import styled_numeric_table
 
 
 def render(start: date, end: date) -> None:
@@ -27,7 +27,7 @@ def render(start: date, end: date) -> None:
     if top_n != "전체": view = view.head(int(top_n))
     view.insert(0, "순위", range(1, len(view)+1))
     st.caption("SERA 값은 실시간 참고/검증용 스냅샷이며, 공식 집계 기준은 Cafe24 Analytics API입니다.")
-    st.dataframe(display_missing(view), use_container_width=True, hide_index=True)
+    st.dataframe(styled_numeric_table(view), use_container_width=True, hide_index=True)
     st.download_button("상품 판매 베스트 XLSX 다운로드", data=dataframe_to_xlsx(view, "상품판매베스트"),
         file_name=f"미샵_상품판매베스트_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

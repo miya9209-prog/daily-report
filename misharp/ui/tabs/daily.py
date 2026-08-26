@@ -8,7 +8,7 @@ import streamlit as st
 from ...services.comparison import aggregate_range, comparison_dataframe
 from ...services.export_xlsx import multi_sheet_xlsx
 from ...services.query import alerts_dataframe, daily_dataframe, hourly_dataframe
-from ..common import display_missing
+from ..common import display_missing, styled_numeric_table
 
 
 def _fmt_money(v):
@@ -50,77 +50,64 @@ _DAILY_PERCENT_COLUMNS = {
 }
 
 
-def _format_daily_table(df: pd.DataFrame) -> pd.DataFrame:
-    """일별 통계 화면 전용 포맷.
+def _prepare_daily_table(df: pd.DataFrame) -> pd.DataFrame:
+    """일별 통계 화면용 데이터 준비.
 
-    - 건수/금액: 천 단위 콤마, 소수점 없음
-    - 비율: 소수점 둘째 자리
-    - 숫자를 문자열로 변환하여 표 안에서 왼쪽 정렬
-    - 미수집 값은 '자료없음'
+    숫자형 컬럼은 숫자 dtype을 유지해 Streamlit 기본 오른쪽 정렬을 사용한다.
+    날짜만 문자열로 변환한다.
     """
     if df.empty:
         return df
 
     out = df.copy()
-
     if "날짜" in out.columns:
         out["날짜"] = out["날짜"].map(
             lambda v: v.isoformat() if hasattr(v, "isoformat") else str(v)
         )
 
-    for col in out.columns:
-        if col in _DAILY_WHOLE_NUMBER_COLUMNS:
-            out[col] = out[col].map(
-                lambda v: f"{float(v):,.0f}"
-                if v is not None and pd.notna(v)
-                else "자료없음"
-            )
-        elif col in _DAILY_PERCENT_COLUMNS:
-            out[col] = out[col].map(
-                lambda v: f"{float(v):,.2f}"
-                if v is not None and pd.notna(v)
-                else "자료없음"
-            )
-        else:
-            out[col] = out[col].map(
-                lambda v: "자료없음" if v is None or pd.isna(v) else str(v)
-            )
+    for col in _DAILY_WHOLE_NUMBER_COLUMNS | _DAILY_PERCENT_COLUMNS:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
 
     return out
 
 
-def _format_hourly_table(df: pd.DataFrame) -> pd.DataFrame:
-    """시간대 표도 일별 표와 같은 읽기 규칙을 적용."""
+def _daily_column_config():
+    cfg = {}
+    for col in _DAILY_WHOLE_NUMBER_COLUMNS:
+        cfg[col] = st.column_config.NumberColumn(col, format="%,.0f")
+    for col in _DAILY_PERCENT_COLUMNS:
+        cfg[col] = st.column_config.NumberColumn(col, format="%.2f")
+    return cfg
+
+
+def _prepare_hourly_table(df: pd.DataFrame) -> pd.DataFrame:
+    """시간대 표도 숫자 dtype을 유지해 오른쪽 정렬한다."""
     if df.empty:
         return df
 
     out = df.copy()
-    whole_cols = {"매출", "주문", "방문", "페이지뷰", "객단가"}
-    pct_cols = {"전환율(%)"}
+    if "날짜" in out.columns:
+        out["날짜"] = out["날짜"].map(
+            lambda v: v.isoformat() if hasattr(v, "isoformat") else str(v)
+        )
 
-    for col in out.columns:
-        if col == "날짜":
-            out[col] = out[col].map(
-                lambda v: v.isoformat() if hasattr(v, "isoformat") else str(v)
-            )
-        elif col in whole_cols:
-            out[col] = out[col].map(
-                lambda v: f"{float(v):,.0f}"
-                if v is not None and pd.notna(v)
-                else "자료없음"
-            )
-        elif col in pct_cols:
-            out[col] = out[col].map(
-                lambda v: f"{float(v):,.2f}"
-                if v is not None and pd.notna(v)
-                else "자료없음"
-            )
-        else:
-            out[col] = out[col].map(
-                lambda v: "자료없음" if v is None or pd.isna(v) else str(v)
-            )
-
+    for col in {"매출", "주문", "방문", "페이지뷰", "객단가", "전환율(%)"}:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
     return out
+
+
+def _hourly_column_config():
+    cfg = {
+        "매출": st.column_config.NumberColumn("매출", format="%,.0f"),
+        "주문": st.column_config.NumberColumn("주문", format="%,.0f"),
+        "방문": st.column_config.NumberColumn("방문", format="%,.0f"),
+        "페이지뷰": st.column_config.NumberColumn("페이지뷰", format="%,.0f"),
+        "객단가": st.column_config.NumberColumn("객단가", format="%,.0f"),
+        "전환율(%)": st.column_config.NumberColumn("전환율(%)", format="%.2f"),
+    }
+    return cfg
 
 
 def render(start: date, end: date) -> None:
@@ -184,7 +171,7 @@ def render(start: date, end: date) -> None:
 
     st.subheader("일별 통계")
     st.dataframe(
-        _format_daily_table(df),
+        styled_numeric_table(df),
         use_container_width=True,
         hide_index=True,
     )
@@ -192,7 +179,7 @@ def render(start: date, end: date) -> None:
     if not hourly.empty:
         with st.expander("시간대별 매출·주문·방문 보기", expanded=False):
             st.dataframe(
-                _format_hourly_table(hourly),
+                styled_numeric_table(hourly),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -206,7 +193,7 @@ def render(start: date, end: date) -> None:
     st.subheader("전년도 · 전전년도 동일기간 비교")
     comp_display = comp.reset_index().rename(columns={"index": "비교구분"})
     st.dataframe(
-        display_missing(comp_display),
+        styled_numeric_table(comp_display, comparison_mode=True),
         use_container_width=True,
         hide_index=True,
     )
