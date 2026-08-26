@@ -1,14 +1,15 @@
-MISHARP DAILY REPORT v3.2.1 — Cafe24 토큰 자동갱신 수정
+MISHARP DAILY REPORT v3.2.2 UI 패치
 
-교체 파일 2개:
-1) misharp/connectors/cafe24_oauth.py
-2) misharp/connectors/cafe24_analytics.py
+교체 파일:
+- misharp/ui/tabs/daily.py
 
-수정 내용:
-- Cafe24 timezone 없는 expires_at을 Asia/Seoul로 해석
-- Access Token 만료 5분 전 Refresh Token으로 자동 갱신
-- Analytics API가 401을 반환하면 강제 refresh 후 1회 자동 재시도
+수정사항:
+1. 일별 통계 숫자에 1,000단위 콤마 표시
+2. 객단가/금액/건수는 소수점 제거
+3. 전환율·광고비율·퍼널 비율은 소수점 둘째 자리까지 표시
+4. 일별 통계의 숫자 셀을 문자열 표시로 바꿔 왼쪽 정렬
+5. 시간대별 표도 같은 숫자 표시 규칙 적용
+6. 상단 핵심지표 숫자를 기존 크기의 90%로 축소
 
-기존 Streamlit/GitHub Secrets는 변경하지 않습니다.
-Cafe24 OAuth 재승인도 우선 필요하지 않습니다.
-교체 후 GitHub Actions → MISHARP data sync → Run workflow(days=1) 실행하세요.
+DB/API/Secrets 변경 없음.
+기존 다운로드 XLSX는 원본 숫자형 데이터를 그대로 유지합니다.
