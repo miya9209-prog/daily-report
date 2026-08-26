@@ -7,14 +7,17 @@ import streamlit as st
 
 from ..config import get_settings
 from ..db import session_scope
-from ..repositories import get_token
+from ..repositories import get_token, latest_sync_runs
 from ..connectors.cafe24_oauth import build_authorize_url
 from ..connectors.cafe24_analytics import Cafe24AnalyticsClient
 from ..services.query import daily_dataframe
 from ..services.sync_daily import sync_cafe24_daily
 from ..services.sync_hourly import sync_hourly
 from ..services.sync_products import sync_product_sales
-from .common import daily_report_guide, sync_status_bar, styled_numeric_table
+from ..importers.manual_excel import (
+    import_iapps_daily, import_sellmate_inventory, preview_iapps_daily, preview_sellmate_inventory,
+)
+from .common import daily_report_guide, sync_status_bar, styled_numeric_table, render_report_table
 
 
 def _is_set(value: str) -> bool:
@@ -24,6 +27,11 @@ def _is_set(value: str) -> bool:
 def _local_today():
     s = get_settings()
     return datetime.now(ZoneInfo(s.app_timezone)).date()
+
+
+def _latest_sync_map():
+    with session_scope() as db:
+        return {r.source: r for r in latest_sync_runs(db)}
 
 
 def _test_cafe24(day) -> dict:
@@ -65,6 +73,7 @@ def render() -> None:
     s = get_settings()
     with session_scope() as db:
         cafe24_token_saved = get_token(db, "cafe24") is not None
+    sync_map = _latest_sync_map()
 
     st.title("데이터·설정")
     st.caption("Cafe24 Analytics를 공식 통계 원천으로 사용하고, 광고비·재고·앱·SERA 참고 데이터를 함께 연결합니다.")
@@ -80,7 +89,8 @@ def render() -> None:
     c1.metric("DB", db_label)
     c2.metric("Cafe24 Mall", s.cafe24_mall_id or "미설정")
     c3.metric("Cafe24 토큰", "저장됨" if cafe24_token_saved else "없음")
-    c4.metric("광고비 시트", "설정됨" if _is_set(s.google_service_account_json) else "미설정")
+    google_ok = bool(sync_map.get("google_adsheet") and sync_map["google_adsheet"].status == "success")
+    c4.metric("광고비 시트", "자동수집" if google_ok else "미수집")
 
     if str(s.database_url).startswith("postgresql"):
         st.caption(f"DB 분리: 같은 Supabase를 사용하되 `{s.database_schema}` schema에만 DAILY REPORT 테이블을 저장합니다.")
@@ -155,7 +165,7 @@ def render() -> None:
                         )
                         df = daily_dataframe(yesterday, yesterday)
                         if not df.empty:
-                            st.dataframe(styled_numeric_table(df), use_container_width=True, hide_index=True)
+                            render_report_table(df)
                     except Exception as exc:
                         st.error(f"어제 Cafe24 데이터 수집 실패: {exc}")
 
@@ -168,45 +178,74 @@ def render() -> None:
                         )
                         df = daily_dataframe(today, today)
                         if not df.empty:
-                            st.dataframe(styled_numeric_table(df), use_container_width=True, hide_index=True)
+                            render_report_table(df)
                         st.info("오늘 데이터는 진행 중 집계입니다. 다음 자동수집에서 같은 날짜가 다시 갱신됩니다.")
                     except Exception as exc:
                         st.error(f"오늘 Cafe24 데이터 수집 실패: {exc}")
 
-    st.subheader("2. 외부 데이터 준비 상태")
+    st.subheader("2. 수동 데이터 업로드")
+    st.caption("Sellmate와 iApps는 관리자에서 Excel을 내려받아 필요할 때 업로드합니다. 같은 기준일을 다시 올리면 DB 값을 교체합니다.")
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("#### Sellmate 실제 재고 Excel")
+        st.caption("Cafe24 재고는 사용하지 않습니다. Sellmate 실제 재고 파일만 기준으로 저장합니다.")
+        inv_date = st.date_input("재고 기준일", value=_local_today(), key="sellmate_inventory_date")
+        inv_file = st.file_uploader("Sellmate 재고 파일", type=["xlsx", "xls", "csv"], key="sellmate_inventory_file")
+        if inv_file is not None:
+            inv_bytes = inv_file.getvalue()
+            try:
+                preview, mapping, sheet = preview_sellmate_inventory(inv_bytes, inv_file.name)
+                st.caption(f"인식 시트: {sheet} · {len(preview):,}행")
+                st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
+                render_report_table(preview.head(10), max_height=360)
+                if st.button("Sellmate 재고 DB 반영", key="apply_sellmate_excel", use_container_width=True):
+                    count = import_sellmate_inventory(inv_bytes, inv_file.name, inv_date)
+                    st.success(f"{inv_date} 실제 재고 {count:,}행 반영 완료")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"Sellmate 파일 인식 실패: {exc}")
+
+    with right:
+        st.markdown("#### iApps 일별 통계 Excel")
+        st.caption("일별 앱 설치수·앱 순방문(DAU)을 날짜 기준으로 덮어씁니다.")
+        app_file = st.file_uploader("iApps 통계 파일", type=["xlsx", "xls", "csv"], key="iapps_daily_file")
+        if app_file is not None:
+            app_bytes = app_file.getvalue()
+            try:
+                preview, mapping, sheet = preview_iapps_daily(app_bytes, app_file.name)
+                st.caption(f"인식 시트: {sheet} · {len(preview):,}일")
+                st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
+                render_report_table(preview.head(14), max_height=360)
+                if st.button("iApps 통계 DB 반영", key="apply_iapps_excel", use_container_width=True):
+                    count = import_iapps_daily(app_bytes, app_file.name)
+                    st.success(f"iApps 일별 통계 {count:,}일 반영 완료")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"iApps 파일 인식 실패: {exc}")
+
+    st.subheader("3. 데이터 운영 상태")
+    sellmate_run = sync_map.get("sellmate_excel")
+    iapps_run = sync_map.get("iapps_excel")
     rows = [
-        {
-            "데이터": "Google 광고비 Sheet",
-            "상태": "준비" if _is_set(s.google_service_account_json) else "미설정",
-            "필요값": "GOOGLE_SERVICE_ACCOUNT_JSON / AD_SHEET_ID / AD_SHEET_GID",
-        },
-        {
-            "데이터": "Sellmate 재고·택배",
-            "상태": "준비" if _is_set(s.sellmate_api_base_url) and _is_set(s.sellmate_api_key) else "API 정보 필요",
-            "필요값": "Base URL / API Key / 재고 endpoint / 출고 endpoint / JSON 샘플",
-        },
-        {
-            "데이터": "iApps 앱 통계",
-            "상태": "준비" if _is_set(s.iapps_api_base_url) and _is_set(s.iapps_api_key) else "API 정보 필요",
-            "필요값": "Base URL / API Key / 일별 설치·DAU endpoint",
-        },
-        {
-            "데이터": "SERA",
-            "상태": "참고 연동",
-            "필요값": "현재는 SERA 보고서 importer / 자동 API 제공 시 connector 교체",
-        },
+        {"데이터": "Cafe24 매출·유입·상품", "방식": "API 자동수집", "상태": "정상" if cafe24_token_saved else "인증 필요"},
+        {"데이터": "Google 광고비", "방식": "GitHub Actions 자동수집", "상태": "정상" if google_ok else "미수집"},
+        {"데이터": "Sellmate 실제 재고", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_run else "첫 업로드 필요"},
+        {"데이터": "iApps 앱 통계", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if iapps_run else "첫 업로드 필요"},
+        {"데이터": "SERA", "방식": "참고용", "상태": "필요 시 업로드"},
     ]
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
-    st.subheader("3. 운영 원칙")
+    st.subheader("4. 운영 원칙")
     st.markdown(
         """
-- **공식 매출·유입·상품 성과:** Cafe24 Analytics API
-- **일별 광고비:** 지정 Google Sheet
-- **옵션별 현재고·택배수량:** Sellmate API
-- **앱 설치·앱 순방문:** iApps API 또는 자동 Export 연동
+- **공식 매출·유입·상품 성과:** Cafe24 Analytics API 자동수집
+- **일별 광고비:** 지정 Google Sheet → GitHub Actions 자동수집
+- **실제 재고:** Sellmate Excel 수동업로드. **Cafe24 재고수량은 사용하지 않음**
+- **앱 설치·앱 순방문:** iApps Excel 수동업로드
+- **같은 기준일 재업로드:** 기존 DB 값을 교체하여 중복 누적하지 않음
 - **SERA:** 실시간 참고·교차검증용. 공식 집계와 혼합하지 않음
-- **과거 비교:** 기존 월별 일일보고를 최초 1회 DB로 이관
         """
     )
 

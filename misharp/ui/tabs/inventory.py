@@ -8,7 +8,7 @@ import streamlit as st
 from ...config import get_settings
 from ...services.export_xlsx import dataframe_to_xlsx
 from ...services.query import inventory_dataframe
-from ..common import styled_numeric_table
+from ..common import styled_numeric_table, render_report_table
 
 
 def _default_season_end(end: date) -> date:
@@ -24,7 +24,7 @@ def render(_: date, end: date) -> None:
     season_end = st.date_input("시즌 종료 기준일", value=max(_default_season_end(end), end))
     df = inventory_dataframe(end, season_end)
     if df.empty:
-        st.info("셀메이트 재고 데이터가 아직 없습니다. API 승인 후 Sellmate 어댑터를 연결하면 활성화됩니다."); return
+        st.info("실제 재고 데이터가 아직 없습니다. 상단 `데이터·설정`에서 Sellmate 재고 Excel을 업로드해주세요."); return
     c1, c2, c3 = st.columns(3)
     min_stock = c1.number_input("재고수량 기준", min_value=0, value=10, step=1)
     status = c2.multiselect("재고상태", sorted(df["재고상태"].dropna().unique().tolist()))
@@ -33,6 +33,6 @@ def render(_: date, end: date) -> None:
     if status: view = view[view["재고상태"].isin(status)]
     view = view.sort_values(sort_col, ascending=(sort_col in ["소진속도달성률(%)", "최근30일 판매"]), na_position="last")
     view.insert(0, "순위", range(1, len(view)+1))
-    st.dataframe(styled_numeric_table(view), use_container_width=True, hide_index=True)
+    render_report_table(view, max_height=700)
     st.download_button("주요 재고 현황 XLSX 다운로드", data=dataframe_to_xlsx(view, "주요재고현황"),
         file_name=f"미샵_주요재고현황_{end:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
