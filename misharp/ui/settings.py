@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import hashlib
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -10,7 +11,7 @@ from ..db import session_scope
 from ..repositories import get_token, latest_sync_runs
 from ..connectors.cafe24_oauth import build_authorize_url
 from ..connectors.cafe24_analytics import Cafe24AnalyticsClient
-from ..services.query import daily_dataframe
+from ..services.query import daily_dataframe, inventory_dataframe
 from ..services.sync_daily import sync_cafe24_daily
 from ..services.sync_hourly import sync_hourly
 from ..services.sync_products import sync_product_sales
@@ -33,6 +34,40 @@ def _local_today():
 def _latest_sync_map():
     with session_scope() as db:
         return {r.source: r for r in latest_sync_runs(db)}
+
+
+
+def _upload_signature(data: bytes, *parts) -> str:
+    h = hashlib.sha256()
+    h.update(data)
+    for part in parts:
+        h.update(str(part).encode("utf-8"))
+    return h.hexdigest()
+
+
+def _render_manual_upload_status(run, label: str) -> None:
+    """페이지를 이동해도 DB에 남아 있는 최근 수동업로드 이력을 표시한다."""
+    if run is None:
+        st.caption(f"{label}: 아직 DB 반영 이력이 없습니다.")
+        return
+
+    when = run.finished_at or run.started_at
+    when_text = when.strftime("%Y-%m-%d %H:%M:%S") if when else "시간 미확인"
+    rows = int(run.rows_written or 0)
+    message = str(run.message or "").strip()
+
+    if run.status == "success":
+        st.success(
+            f"{label} DB 저장완료 · 최근 반영 {when_text} · {rows:,}행"
+            + (f" · {message}" if message else "")
+        )
+    elif run.status == "running":
+        st.info(f"{label}: DB 반영 작업 중 · 시작 {when_text}")
+    else:
+        st.error(
+            f"{label}: 최근 DB 반영 실패 · {when_text}"
+            + (f" · {message}" if message else "")
+        )
 
 
 def _test_cafe24(day) -> dict:
@@ -186,12 +221,18 @@ def render() -> None:
 
     st.subheader("2. 수동 데이터 업로드")
     st.caption("Sellmate와 iApps는 관리자에서 Excel을 내려받아 필요할 때 업로드합니다. 같은 기준일을 다시 올리면 DB 값을 교체합니다.")
+    st.info(
+        "이제 Sellmate와 iApps는 파일을 선택하는 즉시 PostgreSQL DB에 저장합니다. "
+        "같은 파일이 화면 재실행 때문에 반복 저장되지 않도록 파일내용 기준으로 1회만 처리합니다. "
+        "페이지를 이동하면 파일 선택창은 비어 보일 수 있지만, 저장된 데이터와 최근 DB 반영 이력은 그대로 남습니다."
+    )
 
     left, right = st.columns(2)
 
     with left:
         st.markdown("#### Sellmate 실제 재고 Excel")
         st.caption("Cafe24 재고는 사용하지 않습니다. Sellmate 실제 재고 파일만 기준으로 저장합니다.")
+        _render_manual_upload_status(sync_map.get("sellmate_excel"), "Sellmate 실제 재고")
         inv_date = st.date_input("재고 기준일", value=_local_today(), key="sellmate_inventory_date")
         inv_file = st.file_uploader("Sellmate 재고 파일", type=["xlsx", "xls", "csv"], key="sellmate_inventory_file")
         if inv_file is not None:
@@ -201,16 +242,25 @@ def render() -> None:
                 st.caption(f"인식 시트: {sheet} · {len(preview):,}행")
                 st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
                 render_report_table(preview.head(10), max_height=360)
-                if st.button("Sellmate 재고 DB 반영", key="apply_sellmate_excel", use_container_width=True):
-                    count = import_sellmate_inventory(inv_bytes, inv_file.name, inv_date)
-                    st.success(f"{inv_date} 실제 재고 {count:,}행 반영 완료")
-                    st.rerun()
+
+                sig = _upload_signature(inv_bytes, inv_date)
+                if st.session_state.get("sellmate_saved_sig") != sig:
+                    with st.spinner("Sellmate 실제 재고를 DB에 저장하고 있습니다..."):
+                        count = import_sellmate_inventory(inv_bytes, inv_file.name, inv_date)
+                    st.session_state["sellmate_saved_sig"] = sig
+                    st.success(f"{inv_date} 실제 재고 {count:,}행 DB 저장 완료")
+
+                check = inventory_dataframe(inv_date)
+                if not check.empty:
+                    st.caption(f"DB 재조회 확인: {len(check):,}행")
+                    render_report_table(check.head(10), max_height=320)
             except Exception as exc:
-                st.error(f"Sellmate 파일 인식 실패: {exc}")
+                st.error(f"Sellmate 파일 인식/저장 실패: {exc}")
 
     with right:
         st.markdown("#### iApps 일별 통계 Excel")
         st.caption("일별 앱 설치수·앱 순방문(DAU)을 날짜 기준으로 덮어씁니다.")
+        _render_manual_upload_status(sync_map.get("iapps_excel"), "iApps 일별 통계")
         app_file = st.file_uploader("iApps 통계 파일", type=["xlsx", "xls", "csv"], key="iapps_daily_file")
         if app_file is not None:
             app_bytes = app_file.getvalue()
@@ -219,18 +269,40 @@ def render() -> None:
                 st.caption(f"인식 시트: {sheet} · {len(preview):,}일")
                 st.code(" / ".join(f"{k}={v or '-'}" for k, v in mapping.items()), language=None)
                 render_report_table(preview.head(14), max_height=360)
-                if st.button("iApps 통계 DB 반영", key="apply_iapps_excel", use_container_width=True):
-                    count = import_iapps_daily(app_bytes, app_file.name)
-                    st.success(f"iApps 일별 통계 {count:,}일 반영 완료")
-                    st.rerun()
+
+                sig = _upload_signature(app_bytes)
+                if st.session_state.get("iapps_saved_sig") != sig:
+                    with st.spinner("iApps 일별 통계를 DB에 저장하고 있습니다..."):
+                        count = import_iapps_daily(app_bytes, app_file.name)
+                    st.session_state["iapps_saved_sig"] = sig
+                    st.success(f"iApps 일별 통계 {count:,}일 DB 저장 완료")
+
+                app_start = preview["날짜"].min()
+                app_end = preview["날짜"].max()
+                check = daily_dataframe(app_start, app_end)
+                if not check.empty:
+                    app_cols = [c for c in ["날짜", "앱 설치수", "앱 순방문"] if c in check.columns]
+                    verify = check[app_cols].copy()
+                    populated = verify[["앱 설치수", "앱 순방문"]].notna().any(axis=1).sum()
+                    if populated:
+                        st.success(
+                            f"DB 재조회 확인: {app_start} ~ {app_end} 중 앱 통계가 저장된 날짜 {int(populated):,}일"
+                        )
+                        render_report_table(verify.tail(14), max_height=360)
+                    else:
+                        st.error(
+                            "파일은 읽었지만 DB 재조회 결과 앱 설치수/앱 순방문이 비어 있습니다. "
+                            "이 경우 파일 컬럼 형식을 기준으로 importer를 추가 보완해야 합니다."
+                        )
             except Exception as exc:
-                st.error(f"iApps 파일 인식 실패: {exc}")
+                st.error(f"iApps 파일 인식/저장 실패: {exc}")
 
     st.subheader("3. 과거·누락 데이터 채우기")
     st.caption("현재 월 누락분은 GitHub Actions의 MISHARP backfill로 채우고, 전년도·전전년도는 기존 일일보고 Excel을 최초 1회 업로드합니다.")
 
     st.markdown("#### 과거 일일보고 1회 업로드")
-    st.caption("기존 2020~2026 월별 일일보고를 DB의 빈 칸에만 채웁니다. 이미 Cafe24/Google에서 들어온 최신 값은 덮어쓰지 않습니다.")
+    st.caption("기존 2020~2026 월별 일일보고는 용량이 크고 최초 1회 작업이므로, 파일 선택 후 아래 DB 반영 버튼을 직접 눌러 처리합니다. 이미 Cafe24/Google에서 들어온 최신 값은 덮어쓰지 않습니다.")
+    _render_manual_upload_status(sync_map.get("legacy_excel"), "과거 일일보고")
     legacy_file = st.file_uploader(
         "과거 일일보고 Excel",
         type=["xlsx"],
