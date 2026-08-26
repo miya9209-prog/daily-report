@@ -17,6 +17,7 @@ from ..services.sync_products import sync_product_sales
 from ..importers.manual_excel import (
     import_iapps_daily, import_sellmate_inventory, preview_iapps_daily, preview_sellmate_inventory,
 )
+from ..importers.legacy_daily import import_legacy_daily, preview_legacy_daily
 from .common import daily_report_guide, sync_status_bar, styled_numeric_table, render_report_table
 
 
@@ -225,7 +226,42 @@ def render() -> None:
             except Exception as exc:
                 st.error(f"iApps 파일 인식 실패: {exc}")
 
-    st.subheader("3. 데이터 운영 상태")
+    st.subheader("3. 과거·누락 데이터 채우기")
+    st.caption("현재 월 누락분은 GitHub Actions의 MISHARP backfill로 채우고, 전년도·전전년도는 기존 일일보고 Excel을 최초 1회 업로드합니다.")
+
+    st.markdown("#### 과거 일일보고 1회 업로드")
+    st.caption("기존 2020~2026 월별 일일보고를 DB의 빈 칸에만 채웁니다. 이미 Cafe24/Google에서 들어온 최신 값은 덮어쓰지 않습니다.")
+    legacy_file = st.file_uploader(
+        "과거 일일보고 Excel",
+        type=["xlsx"],
+        key="legacy_daily_report_file",
+    )
+    if legacy_file is not None:
+        legacy_bytes = legacy_file.getvalue()
+        try:
+            preview, notes = preview_legacy_daily(legacy_bytes)
+            render_report_table(preview, max_height=220)
+            if notes:
+                with st.expander(f"인식 참고사항 {len(notes)}건"):
+                    for note in notes[:30]:
+                        st.write("-", note)
+            if st.button("과거 일일보고 DB 빈칸 채우기", key="apply_legacy_daily", type="primary"):
+                with st.spinner("과거 일일보고를 DB에 채우고 있습니다..."):
+                    days, fields, notes2 = import_legacy_daily(
+                        legacy_bytes,
+                        legacy_file.name,
+                    )
+                st.success(f"과거 데이터 {days:,}일 검사 · 빈 필드 {fields:,}개 보충 완료")
+                st.rerun()
+        except Exception as exc:
+            st.error(f"과거 일일보고 인식/적재 실패: {exc}")
+
+    st.info(
+        "2026년 8월 1~24일처럼 Cafe24 자동수집 시작 전 누락된 최신 기간은 "
+        "GitHub → Actions → MISHARP backfill에서 시작일/종료일을 지정해 한 번만 실행하세요."
+    )
+
+    st.subheader("4. 데이터 운영 상태")
     sellmate_run = sync_map.get("sellmate_excel")
     iapps_run = sync_map.get("iapps_excel")
     rows = [
@@ -237,7 +273,7 @@ def render() -> None:
     ]
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
-    st.subheader("4. 운영 원칙")
+    st.subheader("5. 운영 원칙")
     st.markdown(
         """
 - **공식 매출·유입·상품 성과:** Cafe24 Analytics API 자동수집
