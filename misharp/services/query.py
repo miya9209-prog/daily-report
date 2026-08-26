@@ -19,10 +19,29 @@ DAILY_COLUMNS = {
 }
 
 
+def _derived_bookmark_visits(row: DailyCondition):
+    if row.bookmark_visits is not None:
+        return row.bookmark_visits
+    if row.visitors is None or row.ad_visits is None or row.search_visits is None:
+        return None
+    return int(row.visitors) - int(row.ad_visits) - int(row.search_visits)
+
+
 def daily_dataframe(start: date, end: date) -> pd.DataFrame:
     with session_scope() as db:
-        rows = db.scalars(select(DailyCondition).where(DailyCondition.date.between(start, end)).order_by(DailyCondition.date)).all()
-    return pd.DataFrame([{label: getattr(r, field) for field, label in DAILY_COLUMNS.items()} for r in rows], columns=list(DAILY_COLUMNS.values()))
+        rows = db.scalars(
+            select(DailyCondition)
+            .where(DailyCondition.date.between(start, end))
+            .order_by(DailyCondition.date)
+        ).all()
+
+    records = []
+    for r in rows:
+        rec = {}
+        for field, label in DAILY_COLUMNS.items():
+            rec[label] = _derived_bookmark_visits(r) if field == "bookmark_visits" else getattr(r, field)
+        records.append(rec)
+    return pd.DataFrame(records, columns=list(DAILY_COLUMNS.values()))
 
 
 def hourly_dataframe(start: date, end: date) -> pd.DataFrame:

@@ -11,14 +11,78 @@ from .models import (
 
 
 def upsert_daily(session, day: date, **values) -> DailyCondition:
-    row = session.get(DailyCondition, day)
+    """날짜 기준 안전한 부분 upsert.
+
+    Cafe24 백필/자동수집과 iApps·Sellmate 수동업로드가 같은 날짜를
+    동시에 건드려도 INSERT 충돌이 나지 않도록 DB의 ON CONFLICT를 사용한다.
+    전달된 값 중 None은 기존 값을 지우지 않는다.
+    """
+    payload = {
+        key: value
+        for key, value in values.items()
+        if hasattr(DailyCondition, key) and value is not None
+    }
+    payload["updated_at"] = datetime.utcnow()
+
+    insert_payload = {"date": day, **payload}
+    # ORM Python default가 Core INSERT에서 누락되는 환경을 대비한다.
+    if "sources" not in insert_payload:
+        insert_payload["sources"] = {}
+
+    dialect = session.get_bind().dialect.name
+
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+
+        stmt = dialect_insert(DailyCondition).values(**insert_payload)
+        update_values = {
+            key: getattr(stmt.excluded, key)
+            for key in payload
+        }
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[DailyCondition.date],
+            set_=update_values,
+        )
+        session.execute(stmt)
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+
+        stmt = dialect_insert(DailyCondition).values(**insert_payload)
+        update_values = {
+            key: getattr(stmt.excluded, key)
+            for key in payload
+        }
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[DailyCondition.date],
+            set_=update_values,
+        )
+        session.execute(stmt)
+    else:
+        # 예상치 못한 DB에서도 최대한 안전하게 update-first로 처리한다.
+        with session.no_autoflush:
+            row = session.scalar(
+                select(DailyCondition).where(DailyCondition.date == day).limit(1)
+            )
+        if row is None:
+            row = DailyCondition(**insert_payload)
+            session.add(row)
+            session.flush()
+        else:
+            for key, value in payload.items():
+                setattr(row, key, value)
+            session.flush()
+        return row
+
+    # DB-native upsert 후 ORM 객체를 새로 읽어 호출부에서 sources 등을 이어서 수정한다.
+    with session.no_autoflush:
+        row = session.scalar(
+            select(DailyCondition)
+            .where(DailyCondition.date == day)
+            .execution_options(populate_existing=True)
+            .limit(1)
+        )
     if row is None:
-        row = DailyCondition(date=day)
-        session.add(row)
-    for key, value in values.items():
-        if hasattr(row, key) and value is not None:
-            setattr(row, key, value)
-    row.updated_at = datetime.utcnow()
+        raise RuntimeError(f"일별 데이터 upsert 후 재조회 실패: {day}")
     return row
 
 

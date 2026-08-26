@@ -34,20 +34,31 @@ SELLMATE_ALIASES = {
     "product_no": _alias_set("상품번호", "카페24상품번호", "쇼핑몰상품번호", "product_no", "product no"),
     "variant_code": _alias_set(
         "품목코드", "옵션코드", "자체품목코드", "재고관리코드", "sku", "item code", "item_code",
-        "상품코드", "품번", "goods_code",
+        "상품코드", "품번", "goods_code", "판매자상품코드", "업체상품코드",
+        "상품관리코드", "관리코드", "관리번호",
     ),
-    "product_name": _alias_set("상품명", "품명", "goods_name", "product_name", "상품"),
+    "product_name": _alias_set(
+        "상품명", "품명", "판매상품명", "셀메이트상품명", "상품이름",
+        "goods_name", "product_name"
+    ),
     "option_name": _alias_set("옵션", "옵션명", "옵션정보", "품목명", "option", "option_name", "옵션값"),
     "stock_qty": _alias_set(
         "현재고", "실재고", "재고", "재고수량", "실재고수량", "보유재고", "stock", "stock_qty",
-        "현재재고", "총재고",
+        "현재재고", "총재고", "재고량", "잔여재고", "정상재고",
+        "현재고정상", "실재고정상", "총재고수량",
     ),
     "available_qty": _alias_set(
-        "판매가능재고", "판매가능수량", "가용재고", "가용수량", "available_stock", "available_qty",
+        "판매가능재고", "판매가능수량", "가용재고", "가용수량",
+        "가용재고수량", "주문가능재고", "주문가능수량", "판매가능",
+        "available_stock", "available_qty",
     ),
 }
 
 SELLMATE_SHIPPING_ALIASES = {
+    "shipping_date": _alias_set(
+        "발송일자", "발송일", "출고일자", "출고일", "배송일자", "배송일",
+        "처리일자", "처리일", "shipping_date", "shipment_date", "dispatch_date",
+    ),
     "shipping_count": _alias_set(
         "당일발송수량", "당일 발송수량", "발송수량", "발송 수량",
         "발송건수", "출고수량", "출고 수량", "출고건수",
@@ -57,11 +68,13 @@ SELLMATE_SHIPPING_ALIASES = {
     ),
     "tracking_no": _alias_set(
         "운송장번호", "운송장 번호", "송장번호", "송장 번호",
-        "택배송장번호", "tracking_no", "trackingnumber", "invoice_no",
+        "택배송장번호", "송장", "운송장", "배송번호", "택배번호",
+        "송장코드", "운송장코드", "tracking_no", "trackingnumber", "invoice_no",
     ),
     "order_no": _alias_set(
         "주문번호", "주문 번호", "쇼핑몰주문번호", "몰주문번호",
-        "order_no", "orderno", "shop_order_no",
+        "주문코드", "주문id", "주문아이디", "셀메이트주문번호",
+        "판매처주문번호", "원주문번호", "order_no", "orderno", "shop_order_no",
     ),
 }
 
@@ -86,13 +99,67 @@ class ParsedUpload:
     header_row: int
 
 
-def _read_csv(data: bytes) -> pd.DataFrame:
+def _decode_csv_text(data: bytes) -> str:
     for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
         try:
-            return pd.read_csv(StringIO(data.decode(enc)), header=None)
+            return data.decode(enc)
         except Exception:
             continue
     raise ValueError("CSV 인코딩을 읽지 못했습니다.")
+
+
+def _read_csv(data: bytes) -> pd.DataFrame:
+    """Sellmate CSV의 안내문/제목 1행 때문에 열 수 없는 문제를 피한다.
+
+    실제 파일 예:
+    ●일자별배송리스트 (2026-06-01~2026-08-26)
+    "일련번호","송장번호",...,"발송일자",...
+    """
+    text = _decode_csv_text(data)
+    lines = text.splitlines()
+
+    # 첫 데이터 헤더로 보이는 줄부터 읽는다.
+    start = 0
+    for i, line in enumerate(lines[:120]):
+        normalized = line.replace('"', "")
+        if line.count(",") >= 2 and any(
+            key in normalized
+            for key in (
+                "송장번호", "발송일자", "일련번호",
+                "상품명", "실재고", "현재고", "옵션명",
+                "날짜", "일자",
+            )
+        ):
+            start = i
+            break
+
+    body = "\n".join(lines[start:])
+    try:
+        return pd.read_csv(StringIO(body), header=None)
+    except Exception as exc:
+        raise ValueError(f"CSV 내용을 읽지 못했습니다: {exc}") from exc
+
+
+def _csv_declared_date_range(data: bytes) -> tuple[date, date] | None:
+    """Sellmate CSV 제목의 '(YYYY-MM-DD~YYYY-MM-DD)' 범위를 읽는다."""
+    try:
+        text = _decode_csv_text(data)
+    except Exception:
+        return None
+    head = "\n".join(text.splitlines()[:5])
+    m = re.search(
+        r"(20\d{2})[-./](\d{1,2})[-./](\d{1,2})\s*[~～-]\s*"
+        r"(20\d{2})[-./](\d{1,2})[-./](\d{1,2})",
+        head,
+    )
+    if not m:
+        return None
+    try:
+        start = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        end = date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
+        return (start, end) if start <= end else (end, start)
+    except Exception:
+        return None
 
 
 def _sheet_candidates(data: bytes, filename: str):
@@ -112,20 +179,81 @@ def _sheet_candidates(data: bytes, filename: str):
         yield sheet, raw
 
 
-def _find_header(raw: pd.DataFrame, aliases: dict[str, set[str]], required: set[str]) -> tuple[int, dict[str, str | None]] | None:
-    max_rows = min(len(raw), 35)
+def _unique_headers(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    counts: dict[str, int] = {}
+    for i, value in enumerate(values):
+        base = str(value).strip() if pd.notna(value) and str(value).strip() else f"__blank_{i}"
+        counts[base] = counts.get(base, 0) + 1
+        out.append(base if counts[base] == 1 else f"{base}__{counts[base]}")
+    return out
+
+
+def _best_alias_match(header: str, names: set[str]) -> tuple[int, int] | None:
+    normed = _norm(header)
+    if not normed:
+        return None
+    if normed in names:
+        return (2, len(normed))
+
+    # Sellmate 헤더는 '실재고(정상)', '쇼핑몰 주문번호(원본)'처럼
+    # 접두/접미 설명이 붙는 경우가 많아 부분일치도 허용한다.
+    best = None
+    for alias in names:
+        if not alias:
+            continue
+        # 2글자 별칭은 너무 짧을 수 있어 완전 포함일 때만 낮은 점수로 사용.
+        if alias in normed or (len(normed) >= 3 and normed in alias):
+            score = (1, len(alias))
+            if best is None or score > best:
+                best = score
+    return best
+
+
+def _detect_mapping(headers: list[str], aliases: dict[str, set[str]]) -> dict[str, str | None]:
+    mapping: dict[str, str | None] = {}
+    for field, names in aliases.items():
+        best_header = None
+        best_score = None
+        for header in headers:
+            score = _best_alias_match(header, names)
+            if score is not None and (best_score is None or score > best_score):
+                best_score = score
+                best_header = header
+        mapping[field] = best_header
+    return mapping
+
+
+def _find_header(
+    raw: pd.DataFrame,
+    aliases: dict[str, set[str]],
+    required: set[str],
+) -> tuple[int, int, list[str], dict[str, str | None]] | None:
+    # Sellmate 파일은 안내문/필터조건 때문에 헤더가 아래쪽에 있을 수 있다.
+    max_rows = min(len(raw), 120)
     for r in range(max_rows):
-        row = raw.iloc[r].tolist()
-        seen = {_norm(v): str(v).strip() for v in row if pd.notna(v) and str(v).strip()}
-        mapping: dict[str, str | None] = {}
-        hits: set[str] = set()
-        for field, names in aliases.items():
-            found = next((original for normed, original in seen.items() if normed in names), None)
-            mapping[field] = found
-            if found is not None:
-                hits.add(field)
-        if required.issubset(hits):
-            return r, mapping
+        variants: list[tuple[int, list[Any]]] = [(1, raw.iloc[r].tolist())]
+
+        # 2단 헤더(예: 1행 '재고', 2행 '실재고/가용재고')도 한 헤더로 결합한다.
+        if r + 1 < len(raw):
+            first = raw.iloc[r].tolist()
+            second = raw.iloc[r + 1].tolist()
+            combined = []
+            for a, b in zip(first, second):
+                aa = "" if pd.isna(a) else str(a).strip()
+                bb = "" if pd.isna(b) else str(b).strip()
+                if aa and bb and aa != bb:
+                    combined.append(f"{aa} {bb}")
+                else:
+                    combined.append(bb or aa)
+            variants.append((2, combined))
+
+        for consumed, values in variants:
+            headers = _unique_headers(values)
+            mapping = _detect_mapping(headers, aliases)
+            hits = {field for field, header in mapping.items() if header is not None}
+            if required.issubset(hits):
+                return r, consumed, headers, mapping
     return None
 
 
@@ -141,13 +269,26 @@ def _parse_with_aliases(
             found = _find_header(raw, aliases, required)
             if not found:
                 continue
-            header_row, mapping = found
-            headers = [str(x).strip() if pd.notna(x) else f"__blank_{i}" for i, x in enumerate(raw.iloc[header_row].tolist())]
-            frame = raw.iloc[header_row + 1 :].copy()
+            header_row, consumed, headers, mapping = found
+            frame = raw.iloc[header_row + consumed :].copy()
             frame.columns = headers
             frame = frame.dropna(how="all").reset_index(drop=True)
-            return ParsedUpload(frame=frame, mapping=mapping, sheet_name=sheet_name, header_row=header_row + 1)
-        diagnostics.append(f"{sheet_name}: 헤더 자동탐지 실패")
+            return ParsedUpload(
+                frame=frame,
+                mapping=mapping,
+                sheet_name=sheet_name,
+                header_row=header_row + 1,
+            )
+
+        # 실패 시 실제 후보 헤더를 오류에 함께 남겨 다음 보완이 쉽도록 한다.
+        sample_headers: list[str] = []
+        for r in range(min(len(raw), 20)):
+            vals = [str(x).strip() for x in raw.iloc[r].tolist() if pd.notna(x) and str(x).strip()]
+            if len(vals) >= 3:
+                sample_headers = vals[:12]
+                break
+        hint = f" / 후보헤더={sample_headers}" if sample_headers else ""
+        diagnostics.append(f"{sheet_name}: 헤더 자동탐지 실패{hint}")
     raise ValueError("파일에서 필요한 헤더를 찾지 못했습니다. " + " / ".join(diagnostics))
 
 
@@ -180,6 +321,16 @@ def _to_date(value: Any) -> date | None:
     text = str(value).strip()
     if not text:
         return None
+
+    # '2026-06-01 오전 9:55:00'처럼 한국어 오전/오후가 붙어도
+    # 날짜 부분만 먼저 안전하게 추출한다.
+    m = re.search(r"(20\d{2})[-./](\d{1,2})[-./](\d{1,2})", text)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except Exception:
+            pass
+
     text = re.sub(r"\([^)]*\)", "", text).strip()
     parsed = pd.to_datetime(text, errors="coerce")
     return None if pd.isna(parsed) else parsed.date()
@@ -356,116 +507,157 @@ def import_iapps_daily(data: bytes, filename: str) -> int:
 def preview_sellmate_shipping(
     data: bytes,
     filename: str,
-    shipping_date: date,
 ) -> tuple[pd.DataFrame, dict[str, str | None], str]:
-    """Sellmate 당일 발송 Excel을 읽어 선택한 날짜의 택배수량 1건으로 요약한다.
+    """Sellmate 발송 상세파일을 '일별 발송건수'로 집계한다.
 
-    우선순위:
-    1) 발송수량/출고수량/택배수량 등 명시적 수량 컬럼 합계
-    2) 운송장번호 고유 개수
-    3) 주문번호 고유 개수
-
-    일반 '수량' 컬럼은 상품수량일 수 있어 자동 사용하지 않는다.
+    DAILY REPORT의 택배수량 정의:
+    - 날짜 = 발송일자
+    - 발송건수 = 날짜별 고유 송장번호 수
+    - 같은 송장이 여러 상품행으로 반복되어도 1건으로 계산
+    - 송장번호가 없는 파일만 주문번호 고유건수로 대체
+    - CSV 제목에 조회기간이 있으면 그 기간의 무발송일도 0건으로 저장
     """
     parsed = _parse_with_aliases(
         data,
         filename,
         SELLMATE_SHIPPING_ALIASES,
         required_sets=[
-            {"shipping_count"},
-            {"tracking_no"},
-            {"order_no"},
+            {"shipping_date", "tracking_no"},
+            {"shipping_date", "order_no"},
+            {"shipping_date", "shipping_count"},
         ],
     )
     m = parsed.mapping
 
+    by_day: dict[date, set[str]] = {}
+    summed_by_day: dict[date, int] = {}
+
+    date_col = m.get("shipping_date")
+    if not date_col:
+        raise ValueError("발송일자 컬럼을 찾지 못했습니다.")
+
+    tracking_col = m.get("tracking_no")
+    order_col = m.get("order_no")
+    count_col = m.get("shipping_count")
+
     method = ""
-    count: int | None = None
+    if tracking_col:
+        method = f"{tracking_col} 날짜별 고유건수"
+        for _, r in parsed.frame.iterrows():
+            day = _to_date(r.get(date_col))
+            if day is None:
+                continue
+            value = str(r.get(tracking_col, "") or "").strip()
+            if not value or value == "-":
+                continue
+            by_day.setdefault(day, set()).add(value)
 
-    if m.get("shipping_count"):
-        values = [
-            _to_int(v)
-            for v in parsed.frame[m["shipping_count"]].tolist()
-        ]
-        values = [v for v in values if v is not None]
-        if values:
-            count = int(sum(values))
-            method = f"{m['shipping_count']} 합계"
+    elif order_col:
+        method = f"{order_col} 날짜별 고유건수"
+        for _, r in parsed.frame.iterrows():
+            day = _to_date(r.get(date_col))
+            if day is None:
+                continue
+            value = str(r.get(order_col, "") or "").strip()
+            if not value or value == "-":
+                continue
+            by_day.setdefault(day, set()).add(value)
 
-    if count is None and m.get("tracking_no"):
-        values = (
-            parsed.frame[m["tracking_no"]]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        values = values[values.ne("") & values.ne("-")]
-        if not values.empty:
-            count = int(values.nunique())
-            method = f"{m['tracking_no']} 고유건수"
+    elif count_col:
+        method = f"{count_col} 날짜별 합계"
+        for _, r in parsed.frame.iterrows():
+            day = _to_date(r.get(date_col))
+            if day is None:
+                continue
+            count = _to_int(r.get(count_col))
+            if count is None:
+                continue
+            summed_by_day[day] = summed_by_day.get(day, 0) + count
 
-    if count is None and m.get("order_no"):
-        values = (
-            parsed.frame[m["order_no"]]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        values = values[values.ne("") & values.ne("-")]
-        if not values.empty:
-            count = int(values.nunique())
-            method = f"{m['order_no']} 고유건수"
+    counts: dict[date, int] = {}
+    if by_day:
+        counts = {day: len(values) for day, values in by_day.items()}
+    elif summed_by_day:
+        counts = summed_by_day
 
-    if count is None:
-        raise ValueError(
-            "발송수량/운송장번호/주문번호 중 집계 가능한 컬럼을 찾지 못했습니다. "
-            "실제 Sellmate 발송 Excel 샘플을 기준으로 헤더 별칭을 보완해주세요."
-        )
+    if not counts:
+        raise ValueError("발송일자별 발송건수를 계산할 수 있는 데이터가 없습니다.")
 
-    preview = pd.DataFrame(
-        [{
-            "날짜": shipping_date,
-            "택배수량": count,
+    # 조회기간 중 발송이 없는 날도 '자료없음'이 아니라 실제 0건으로 저장한다.
+    declared_range = _csv_declared_date_range(data) if filename.lower().endswith(".csv") else None
+    if declared_range:
+        range_start, range_end = declared_range
+    else:
+        range_start, range_end = min(counts), max(counts)
+
+    rows = []
+    day = range_start
+    while day <= range_end:
+        rows.append({
+            "날짜": day,
+            "택배수량": int(counts.get(day, 0)),
             "집계방식": method,
-        }]
-    )
-    return preview, m, parsed.sheet_name
+        })
+        day += timedelta(days=1)
+
+    return pd.DataFrame(rows), m, parsed.sheet_name
 
 
 def import_sellmate_shipping(
     data: bytes,
     filename: str,
-    shipping_date: date,
-) -> int:
-    preview, _, _ = preview_sellmate_shipping(data, filename, shipping_date)
-    shipping_count = _to_int(preview.iloc[0]["택배수량"])
-    method = str(preview.iloc[0]["집계방식"])
+) -> dict[str, int | date]:
+    preview, _, _ = preview_sellmate_shipping(data, filename)
+
+    if preview.empty:
+        raise ValueError("저장할 발송 데이터가 없습니다.")
 
     with session_scope() as db:
         run = start_sync_run(db, "sellmate_shipping_excel")
         try:
-            row = upsert_daily(
-                db,
-                shipping_date,
-                shipping_count=shipping_count,
-            )
-            sources = dict(row.sources or {})
-            sources["sellmate_shipping_excel"] = {
-                "file": filename,
-                "method": method,
-            }
-            row.sources = sources
+            for _, r in preview.iterrows():
+                day = _to_date(r["날짜"])
+                shipping_count = _to_int(r["택배수량"])
+                if day is None or shipping_count is None:
+                    continue
+
+                row = upsert_daily(
+                    db,
+                    day,
+                    shipping_count=shipping_count,
+                )
+                sources = dict(row.sources or {})
+                sources["sellmate_shipping_excel"] = {
+                    "file": filename,
+                    "method": str(r.get("집계방식") or ""),
+                }
+                row.sources = sources
+
+            start_day = _to_date(preview["날짜"].min())
+            end_day = _to_date(preview["날짜"].max())
+            total_shipments = int(preview["택배수량"].fillna(0).sum())
+            active_days = int((preview["택배수량"].fillna(0) > 0).sum())
+            calendar_days = int(len(preview))
+
             finish_sync_run(
                 db,
                 run,
                 "success",
-                rows_written=1,
+                rows_written=calendar_days,
                 message=(
-                    f"{filename} / {shipping_date.isoformat()} / "
-                    f"택배수량 {shipping_count:,} / {method}"
+                    f"{filename} / {start_day}~{end_day} / "
+                    f"{calendar_days:,}일 / 발송일 {active_days:,}일 / "
+                    f"총 발송 {total_shipments:,}건"
                 ),
             )
-            return int(shipping_count or 0)
+            return {
+                "start_date": start_day,
+                "end_date": end_day,
+                "calendar_days": calendar_days,
+                "active_days": active_days,
+                "total_shipments": total_shipments,
+            }
         except Exception as exc:
             finish_sync_run(db, run, "failed", message=str(exc))
             raise
+

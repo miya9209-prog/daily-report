@@ -1,24 +1,41 @@
-MISHARP DAILY REPORT v3.3.5 — Sellmate 2파일 + 경보 1줄 통합
+MISHARP DAILY REPORT v3.3.9 — 일별통계/웹북마크/회원가입/오늘기본 통합 패치
 
-교체/추가 파일:
+이번 ZIP 하나만 덮어쓰면 v3.3.8의 최근 수정 + 아래 신규 수정이 함께 반영됩니다.
+
+신규 수정
+1. 일별 통계: 최근 날짜가 가장 위에 표시
+2. 웹북마크: 전체방문 - 광고유입 - 검색방문으로 자동 계산
+   - 기존 DB의 웹북마크가 비어 있어도 화면/비교에서 즉시 계산
+   - 새 Cafe24 수집/백필 시 DB bookmark_visits에도 저장
+3. 회원가입
+   - Cafe24 Admin /dashboard의 new_members_count 사용
+   - mall.read_store scope를 OAuth 승인 링크에 자동 포함
+   - 기존 토큰 사용자는 데이터·설정에서 Cafe24 인증 링크를 1회 다시 승인해야 함
+   - dashboard는 오늘 신규회원 값이므로 오늘 수집시에만 저장
+4. 기본 조회기간: 이번 달이 아니라 오늘
+5. 핵심지표 제목
+   - 오늘: '오늘의 핵심 지표'
+   - 단일 과거일: 'YYYY-MM-DD 핵심 지표'
+   - 여러 날짜: '선택기간 핵심 지표'
+
+v3.3.8에서 함께 포함되는 최근 수정
+- 대표 경보 여러 줄 → 가장 중요한 1건만 한 줄
+- Sellmate 실제 재고 업로드
+- Sellmate 발송내역 CSV/Excel 일별 발송건수 DB화
+- iApps/Sellmate 기존 날짜 안전 upsert
+- Cafe24 재고는 실제 재고 원천으로 사용하지 않음
+
+덮어쓸 파일
 - misharp/importers/manual_excel.py
 - misharp/repositories.py
 - misharp/ui/settings.py
 - misharp/ui/tabs/daily.py
+- misharp/ui/date_filters.py
+- misharp/services/query.py
+- misharp/services/comparison.py
+- misharp/services/sync_daily.py
+- misharp/connectors/cafe24_admin.py
+- misharp/connectors/cafe24_oauth.py
 
-변경사항:
-1. Sellmate 업로드를 2개로 분리
-   - ① 실제 재고 Excel → 주요 재고 현황
-   - ② 당일 발송수량 Excel → 일별 종합통계의 택배수량
-2. Sellmate 당일 발송 집계 우선순위
-   - 발송수량/출고수량/택배수량 명시 컬럼 합계
-   - 없으면 운송장번호 고유건수
-   - 없으면 주문번호 고유건수
-   - 일반 '수량'은 상품수량일 수 있어 자동 사용하지 않음
-3. 두 Sellmate 파일 모두 파일 선택 즉시 PostgreSQL DB 저장
-4. 저장 직후 DB 재조회로 실제 반영값 확인
-5. iApps 자동저장/DB 재조회 기능 유지
-6. 대표 경보는 여러 줄이 아니라 가장 중요한 1건만 한 줄 표시
-7. Cafe24 재고는 실제 재고 원천으로 사용하지 않음
-
-DB schema/API Secrets 변경 없음.
+DB schema / Secret 값 변경 없음.
+단, 회원가입 수집을 위해 기존 Cafe24 OAuth는 데이터·설정에서 한 번 재승인 필요.

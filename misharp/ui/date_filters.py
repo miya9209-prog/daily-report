@@ -17,7 +17,8 @@ def _today() -> date:
 def date_range_selector() -> tuple[date, date]:
     today = _today()
     if "range_start" not in st.session_state:
-        st.session_state.range_start = today.replace(day=1)
+        # 기본 진입은 월 누계가 아니라 오늘 당일
+        st.session_state.range_start = today
         st.session_state.range_end = today
 
     cols = st.columns(6)

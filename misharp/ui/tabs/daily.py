@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
+from zoneinfo import ZoneInfo
+
+from ...config import get_settings
 
 from ...services.comparison import aggregate_range, comparison_dataframe
 from ...services.export_xlsx import multi_sheet_xlsx
@@ -126,12 +129,22 @@ def render(start: date, end: date) -> None:
     )
 
     df = daily_dataframe(start, end)
+    if not df.empty and "날짜" in df.columns:
+        # 일별 통계는 최근 날짜가 위로 오게 표시
+        df = df.sort_values("날짜", ascending=False, kind="stable").reset_index(drop=True)
     summary = aggregate_range(start, end)
     comp = comparison_dataframe(start, end)
     alerts = alerts_dataframe(start, end)
     hourly = hourly_dataframe(start, end)
 
-    st.subheader("오늘의 핵심 지표")
+    today = datetime.now(ZoneInfo(get_settings().app_timezone)).date()
+    if start == end == today:
+        metric_title = "오늘의 핵심 지표"
+    elif start == end:
+        metric_title = f"{start:%Y-%m-%d} 핵심 지표"
+    else:
+        metric_title = f"선택기간 핵심 지표 · {start:%m/%d}~{end:%m/%d}"
+    st.subheader(metric_title)
     cols = st.columns(7)
     metrics = [
         ("실결제", _fmt_money(summary.get("실결제"))),

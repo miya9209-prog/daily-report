@@ -28,7 +28,15 @@ def aggregate_range(start: date, end: date) -> dict:
         rows = db.scalars(select(DailyCondition).where(DailyCondition.date.between(start, end))).all()
     result = {}
     for field, label in SUM_FIELDS.items():
-        vals = [getattr(r, field) for r in rows if getattr(r, field) is not None]
+        vals = []
+        for r in rows:
+            if field == "bookmark_visits" and r.bookmark_visits is None:
+                if r.visitors is not None and r.ad_visits is not None and r.search_visits is not None:
+                    vals.append(int(r.visitors) - int(r.ad_visits) - int(r.search_visits))
+                continue
+            value = getattr(r, field)
+            if value is not None:
+                vals.append(value)
         result[label] = sum(vals) if vals else None
     paid, orders, visitors, ad = result.get("실결제"), result.get("구매건수"), result.get("전체방문"), result.get("광고비")
     pv, carts, porders = result.get("상품조회"), result.get("장바구니"), result.get("상품주문")

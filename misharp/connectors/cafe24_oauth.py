@@ -16,6 +16,20 @@ from .http import resilient_session
 
 PROVIDER = "cafe24"
 
+REQUIRED_DAILY_REPORT_SCOPES = ("mall.read_store",)
+
+
+def effective_cafe24_scopes() -> str:
+    """DAILY REPORT에 필요한 기본 scope를 Secrets 값에 자동 보완한다."""
+    raw = str(get_settings().cafe24_scopes or "").replace(",", " ").split()
+    scopes: list[str] = []
+    for scope in [*raw, *REQUIRED_DAILY_REPORT_SCOPES]:
+        scope = str(scope).strip()
+        if scope and scope not in scopes:
+            scopes.append(scope)
+    return " ".join(scopes)
+
+
 
 def _basic_auth(client_id: str, client_secret: str) -> str:
     raw = f"{client_id}:{client_secret}".encode("utf-8")
@@ -41,7 +55,7 @@ def build_authorize_url() -> str:
         "client_id": s.cafe24_client_id,
         "state": state,
         "redirect_uri": s.cafe24_redirect_uri,
-        "scope": s.cafe24_scopes,
+        "scope": effective_cafe24_scopes(),
     }
     return f"https://{s.cafe24_mall_id}.cafe24api.com/api/v2/oauth/authorize?{urlencode(params)}"
 

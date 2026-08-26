@@ -9,7 +9,7 @@ import streamlit as st
 from ..config import get_settings
 from ..db import session_scope
 from ..repositories import get_token, latest_sync_runs
-from ..connectors.cafe24_oauth import build_authorize_url
+from ..connectors.cafe24_oauth import build_authorize_url, effective_cafe24_scopes
 from ..connectors.cafe24_analytics import Cafe24AnalyticsClient
 from ..services.query import daily_dataframe, inventory_dataframe
 from ..services.sync_daily import sync_cafe24_daily
@@ -142,8 +142,13 @@ def render() -> None:
     st.subheader("1. Cafe24 API")
     st.caption("상품·주문·접속통계 권한을 최초 1회 승인합니다. 이후 Access Token은 Refresh Token으로 자동 갱신합니다.")
     st.code(
-        s.cafe24_scopes or "mall.read_order mall.read_product mall.read_analytics mall.read_customer",
+        effective_cafe24_scopes(),
         language=None,
+    )
+    st.caption(
+        "회원가입 수는 Cafe24 Admin 대시보드의 신규회원 수를 사용합니다. "
+        "이번 버전부터 인증 링크에 mall.read_store 권한을 자동 포함합니다. "
+        "기존 토큰은 아래 인증 링크로 한 번만 다시 승인해야 회원가입 수집이 시작됩니다."
     )
     missing = [
         key
@@ -226,11 +231,11 @@ def render() -> None:
 
     st.subheader("2. 수동 데이터 업로드")
     st.caption(
-        "Sellmate는 실제 재고와 당일 발송수량 파일이 서로 다르므로 업로드를 2개로 분리합니다. "
+        "Sellmate는 실제 재고 파일과 발송내역 파일이 서로 다르므로 업로드를 2개로 분리합니다. "
         "iApps도 관리자 Excel을 필요할 때 업로드합니다."
     )
     st.info(
-        "Sellmate 재고 / Sellmate 당일 발송 / iApps 통계는 파일을 선택하는 즉시 PostgreSQL DB에 저장합니다. "
+        "Sellmate 재고 / Sellmate 발송내역 / iApps 통계는 파일을 선택하는 즉시 PostgreSQL DB에 저장합니다. "
         "페이지를 이동하면 파일 선택창은 비어 보일 수 있지만 DB 저장값과 최근 반영 이력은 유지됩니다."
     )
 
@@ -314,22 +319,18 @@ def render() -> None:
                 )
 
     with sell_right:
-        st.markdown("#### ② 당일 발송수량 Excel")
+        st.markdown("#### ② 발송내역 CSV/Excel")
         st.caption(
-            "Sellmate에서 내려받은 당일 발송 파일을 올리면 "
-            "일별 종합통계의 '택배수량'에 저장합니다."
+            "Sellmate의 일자별 배송리스트를 올리면 발송일자를 기준으로 "
+            "날짜별 고유 송장번호를 집계해 일별 종합통계의 '택배수량'으로 저장합니다."
         )
         _render_manual_upload_status(
             sync_map.get("sellmate_shipping_excel"),
-            "Sellmate 당일 발송",
+            "Sellmate 일별 발송건수",
         )
-        ship_date = st.date_input(
-            "발송 기준일",
-            value=_local_today(),
-            key="sellmate_shipping_date",
-        )
+
         ship_file = st.file_uploader(
-            "Sellmate 당일 발송 파일",
+            "Sellmate 발송내역 파일",
             type=["xlsx", "xls", "csv"],
             key="sellmate_shipping_file",
         )
@@ -340,10 +341,17 @@ def render() -> None:
                 preview, mapping, sheet = preview_sellmate_shipping(
                     ship_bytes,
                     ship_file.name,
-                    ship_date,
                 )
+
+                ship_start = preview["날짜"].min()
+                ship_end = preview["날짜"].max()
+                total_shipments = int(preview["택배수량"].fillna(0).sum())
+                active_days = int((preview["택배수량"].fillna(0) > 0).sum())
+
                 st.caption(
-                    f"인식 시트: {sheet}"
+                    f"인식: {ship_start} ~ {ship_end} · "
+                    f"{len(preview):,}일 · 발송일 {active_days:,}일 · "
+                    f"총 발송 {total_shipments:,}건"
                 )
                 st.code(
                     " / ".join(
@@ -353,35 +361,33 @@ def render() -> None:
                     language=None,
                 )
                 render_report_table(
-                    preview,
-                    max_height=220,
+                    preview.tail(20),
+                    max_height=420,
                 )
 
-                sig = _upload_signature(
-                    ship_bytes,
-                    ship_date,
-                )
+                sig = _upload_signature(ship_bytes)
                 if st.session_state.get(
                     "sellmate_shipping_saved_sig"
                 ) != sig:
                     with st.spinner(
-                        "Sellmate 당일 발송수량을 DB에 저장하고 있습니다..."
+                        "Sellmate 발송내역을 날짜별 발송건수로 집계해 DB에 저장하고 있습니다..."
                     ):
-                        shipping_count = import_sellmate_shipping(
+                        result = import_sellmate_shipping(
                             ship_bytes,
                             ship_file.name,
-                            ship_date,
                         )
                     st.session_state[
                         "sellmate_shipping_saved_sig"
                     ] = sig
                     st.success(
-                        f"{ship_date} 택배수량 {shipping_count:,}건 DB 저장 완료"
+                        f"{result['start_date']} ~ {result['end_date']} "
+                        f"{result['calendar_days']:,}일 DB 저장 완료 · "
+                        f"총 발송 {result['total_shipments']:,}건"
                     )
 
                 check = daily_dataframe(
-                    ship_date,
-                    ship_date,
+                    ship_start,
+                    ship_end,
                 )
                 if not check.empty:
                     cols = [
@@ -389,12 +395,10 @@ def render() -> None:
                         for c in ["날짜", "택배수량"]
                         if c in check.columns
                     ]
-                    st.caption(
-                        "DB 재조회 확인"
-                    )
+                    st.caption("DB 재조회 확인 · 최근 20일")
                     render_report_table(
-                        check[cols],
-                        max_height=220,
+                        check[cols].tail(20),
+                        max_height=420,
                     )
             except Exception as exc:
                 st.error(
@@ -529,7 +533,7 @@ def render() -> None:
         {"데이터": "Cafe24 매출·유입·상품", "방식": "API 자동수집", "상태": "정상" if cafe24_token_saved else "인증 필요"},
         {"데이터": "Google 광고비", "방식": "GitHub Actions 자동수집", "상태": "정상" if google_ok else "미수집"},
         {"데이터": "Sellmate 실제 재고", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_run else "첫 업로드 필요"},
-        {"데이터": "Sellmate 당일 발송수량", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_shipping_run else "첫 업로드 필요"},
+        {"데이터": "Sellmate 일별 발송건수", "방식": "CSV/Excel 수동업로드", "상태": "업로드 이력 있음" if sellmate_shipping_run else "첫 업로드 필요"},
         {"데이터": "iApps 앱 통계", "방식": "Excel 수동업로드", "상태": "업로드 이력 있음" if iapps_run else "첫 업로드 필요"},
         {"데이터": "SERA", "방식": "참고용", "상태": "필요 시 업로드"},
     ]
@@ -541,7 +545,7 @@ def render() -> None:
 - **공식 매출·유입·상품 성과:** Cafe24 Analytics API 자동수집
 - **일별 광고비:** 지정 Google Sheet → GitHub Actions 자동수집
 - **실제 재고:** Sellmate 실제 재고 Excel 수동업로드. **Cafe24 재고수량은 사용하지 않음**
-- **택배수량:** Sellmate 당일 발송 Excel 수동업로드
+- **택배수량:** Sellmate 발송내역 CSV/Excel → 발송일자별 고유 송장번호 수로 자동 집계
 - **앱 설치·앱 순방문:** iApps Excel 수동업로드
 - **같은 기준일 재업로드:** 기존 DB 값을 교체하여 중복 누적하지 않음
 - **SERA:** 실시간 참고·교차검증용. 공식 집계와 혼합하지 않음
