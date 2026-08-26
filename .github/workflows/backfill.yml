@@ -1,0 +1,47 @@
+name: MISHARP backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "시작일 YYYY-MM-DD"
+        required: true
+        default: "2026-08-01"
+      end_date:
+        description: "종료일 YYYY-MM-DD"
+        required: true
+        default: "2026-08-26"
+      skip_products:
+        description: "상품별 데이터는 건너뛰기"
+        type: boolean
+        required: true
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Backfill Cafe24
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_SCHEMA: ${{ secrets.DATABASE_SCHEMA }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          CAFE24_MALL_ID: ${{ secrets.CAFE24_MALL_ID }}
+          CAFE24_CLIENT_ID: ${{ secrets.CAFE24_CLIENT_ID }}
+          CAFE24_CLIENT_SECRET: ${{ secrets.CAFE24_CLIENT_SECRET }}
+          CAFE24_REDIRECT_URI: ${{ secrets.CAFE24_REDIRECT_URI }}
+          CAFE24_SCOPES: ${{ secrets.CAFE24_SCOPES }}
+          CAFE24_API_VERSION: ${{ secrets.CAFE24_API_VERSION }}
+          CAFE24_SHOP_NO: ${{ secrets.CAFE24_SHOP_NO }}
+        run: |
+          ARGS="--start '${{ inputs.start_date }}' --end '${{ inputs.end_date }}'"
+          if [ "${{ inputs.skip_products }}" = "true" ]; then
+            ARGS="$ARGS --skip-products"
+          fi
+          eval python -m scripts.backfill_cafe24 $ARGS
