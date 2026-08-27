@@ -89,7 +89,7 @@ def _parse_day(value, year: int, month: int, epoch) -> date | None:
     return d if d and d.year == year and d.month == month else None
 
 
-def _parse_workbook(file_bytes: bytes) -> tuple[list[dict], list[str]]:
+def _parse_workbook(file_bytes: bytes, end_date: date | None = None) -> tuple[list[dict], list[str]]:
     wb = load_workbook(BytesIO(file_bytes), data_only=True, read_only=True)
     records: list[dict] = []
     notes: list[str] = []
@@ -124,6 +124,8 @@ def _parse_workbook(file_bytes: bytes) -> tuple[list[dict], list[str]]:
             d = _parse_day(row[date_col] if date_col < len(row) else None, year, month, wb.epoch)
             if not d:
                 continue
+            if end_date is not None and d > end_date:
+                continue
             values = {}
             for field, col in colmap.items():
                 raw = row[col] if col < len(row) else None
@@ -141,8 +143,8 @@ def _parse_workbook(file_bytes: bytes) -> tuple[list[dict], list[str]]:
     return records, notes
 
 
-def preview_legacy_daily(file_bytes: bytes) -> tuple[pd.DataFrame, list[str]]:
-    records, notes = _parse_workbook(file_bytes)
+def preview_legacy_daily(file_bytes: bytes, end_date: date | None = None) -> tuple[pd.DataFrame, list[str]]:
+    records, notes = _parse_workbook(file_bytes, end_date=end_date)
     if not records:
         raise RuntimeError("과거 일일보고에서 월별 일자 데이터를 찾지 못했습니다.")
     df = pd.DataFrame(records).sort_values("date")
@@ -158,13 +160,14 @@ def preview_legacy_daily(file_bytes: bytes) -> tuple[pd.DataFrame, list[str]]:
     return preview, notes
 
 
-def import_legacy_daily(file_bytes: bytes, file_name: str) -> tuple[int, int, list[str]]:
+def import_legacy_daily(file_bytes: bytes, file_name: str, end_date: date | None = None) -> tuple[int, int, list[str]]:
     """과거 일일보고를 DB에 채운다.
 
     기존 Cafe24/Google/iApps 등 최신 수집값은 절대 덮어쓰지 않고,
     DB에서 비어 있는 컬럼만 과거 엑셀 값으로 보충한다.
+    end_date가 있으면 해당 날짜까지만 읽어 과도한 최신/부분작성 시트를 제외한다.
     """
-    records, notes = _parse_workbook(file_bytes)
+    records, notes = _parse_workbook(file_bytes, end_date=end_date)
     if not records:
         raise RuntimeError("과거 일일보고에서 적재할 데이터를 찾지 못했습니다.")
 

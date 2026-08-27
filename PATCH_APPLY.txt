@@ -1,21 +1,20 @@
-MISHARP DAILY REPORT v3.4.1 — Cafe24 회원가입 수집 보강 통합본
+MISHARP DAILY REPORT v3.4.2 — 과거 일일보고/KST 표시 보강 누적본
 
-v3.4.0 전체 수정사항을 그대로 포함한 누적 패치입니다.
-이 ZIP 하나만 덮어쓰면 됩니다.
+이 ZIP은 v3.4.1 전체 수정사항을 포함합니다. 이 ZIP 하나만 덮어쓰면 됩니다.
 
 이번 수정:
-1. Cafe24 Dashboard 응답이 dict/list/nested 형태여도 new_members_count를 재귀 탐색
-2. new_members_count가 0이어도 정상값 0으로 DB 저장
-3. Cafe24 신규회원 API 단독 테스트 버튼 추가
-4. API 오류가 발생하면 더 이상 조용히 '자료없음'으로만 끝나지 않고 화면에 실제 오류 표시
-5. 오늘 Cafe24 수집 후 회원가입 DB 반영 여부를 즉시 표시
-6. sync 로그에도 member_signups 값/오류 기록
+1. 데이터·설정의 수동 업로드 최근 반영시각을 UTC가 아닌 한국시간(KST)으로 표시
+2. 상단 동기화 상태의 수동 소스 명칭을 한국어로 정리
+3. 과거 일일보고는 합의한 기준대로 2026-05-31까지만 미리보기/DB 반영
+   - 원본 파일의 2026년 6월 시트는 일부만 작성되어 있어 자동 제외
+   - 2026-06-01 이후는 Cafe24 backfill/자동수집 구간
+4. 과거 일일보고 반영 후 DB 재조회 일수까지 확인
+5. 기존 Cafe24/Google/iApps/Sellmate 값은 계속 덮어쓰지 않음
 
-Cafe24 공식 Admin Dashboard:
-- GET /api/v2/admin/dashboard
-- scope: mall.read_store
-- property: new_members_count
+확인 결과:
+- 과거 데이터는 일별 종합통계에 실제로 반영되어 있습니다.
+- 2023년 8월 화면의 실결제/광고비/객단가/전환율/전체방문/페이지뷰/광고유입/앱/택배/회원가입 값은 과거 일일보고 데이터입니다.
+- 2023년 8월 원본의 검색방문/웹북마크는 비어 있으므로 자료없음이 정상입니다.
+- 상품조회/장바구니/상품주문 등 퍼널 데이터도 구형 일일보고 원본에 없어 자료없음이 정상입니다.
 
-덮어쓸 파일은 ZIP 안 경로 그대로 모두 적용.
 DB schema / Secrets 변경 없음.
-OAuth를 이미 mall.read_store 포함 상태로 다시 승인했다면 추가 재승인은 필요 없음.

@@ -58,7 +58,14 @@ def _render_manual_upload_status(run, label: str) -> None:
         return
 
     when = run.finished_at or run.started_at
-    when_text = when.strftime("%Y-%m-%d %H:%M:%S") if when else "시간 미확인"
+    if when:
+        tz = ZoneInfo(get_settings().app_timezone)
+        # SyncRun 시간은 DB에 UTC naive datetime으로 저장되므로 표시할 때 한국시간으로 변환합니다.
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=ZoneInfo("UTC"))
+        when_text = when.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S KST")
+    else:
+        when_text = "시간 미확인"
     rows = int(run.rows_written or 0)
     message = str(run.message or "").strip()
 
@@ -525,7 +532,12 @@ def render() -> None:
     st.caption("현재 월 누락분은 GitHub Actions의 MISHARP backfill로 채우고, 전년도·전전년도는 기존 일일보고 Excel을 최초 1회 업로드합니다.")
 
     st.markdown("#### 과거 일일보고 1회 업로드")
-    st.caption("기존 2020~2026 월별 일일보고는 용량이 크고 최초 1회 작업이므로, 파일 선택 후 아래 DB 반영 버튼을 직접 눌러 처리합니다. 이미 Cafe24/Google에서 들어온 최신 값은 덮어쓰지 않습니다.")
+    legacy_cutoff = datetime(2026, 5, 31).date()
+    st.caption(
+        "과거 일일보고는 2026-05-31까지만 기준 데이터로 사용합니다. "
+        "2026-06-01 이후는 Cafe24 backfill/자동수집 구간이므로 이 업로드에서 제외합니다. "
+        "이미 Cafe24/Google/iApps/Sellmate에서 들어온 값은 덮어쓰지 않습니다."
+    )
     _render_manual_upload_status(sync_map.get("legacy_excel"), "과거 일일보고")
     legacy_file = st.file_uploader(
         "과거 일일보고 Excel",
@@ -535,7 +547,7 @@ def render() -> None:
     if legacy_file is not None:
         legacy_bytes = legacy_file.getvalue()
         try:
-            preview, notes = preview_legacy_daily(legacy_bytes)
+            preview, notes = preview_legacy_daily(legacy_bytes, end_date=legacy_cutoff)
             render_report_table(preview, max_height=220)
             if notes:
                 with st.expander(f"인식 참고사항 {len(notes)}건"):
@@ -546,8 +558,13 @@ def render() -> None:
                     days, fields, notes2 = import_legacy_daily(
                         legacy_bytes,
                         legacy_file.name,
+                        end_date=legacy_cutoff,
                     )
-                st.success(f"과거 데이터 {days:,}일 검사 · 빈 필드 {fields:,}개 보충 완료")
+                verify = daily_dataframe(datetime(2020, 1, 1).date(), legacy_cutoff)
+                st.success(
+                    f"과거 데이터 {days:,}일 검사 · 새로 채운 빈 필드 {fields:,}개 · "
+                    f"DB 재조회 {len(verify):,}일 확인"
+                )
                 st.rerun()
         except Exception as exc:
             st.error(f"과거 일일보고 인식/적재 실패: {exc}")
