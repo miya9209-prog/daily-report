@@ -83,8 +83,24 @@ def sync_cafe24_daily(day: date) -> dict:
                 member_signups=member_signups,
                 sources=sources,
             )
-            finish_sync_run(db, run, "success", rows_written=1)
-            return {"date": row.date.isoformat(), "status": "success"}
+            finish_sync_run(
+                db,
+                run,
+                "success",
+                rows_written=1,
+                message=(
+                    f"member_signups={member_signups}"
+                    if member_signups is not None
+                    else f"member_signups=missing"
+                    + (f" / {member_signup_error}" if member_signup_error else "")
+                ),
+            )
+            return {
+                "date": row.date.isoformat(),
+                "status": "success",
+                "member_signups": member_signups,
+                "member_signup_error": member_signup_error,
+            }
         except Exception as exc:
             finish_sync_run(db, run, "failed", message=str(exc)); raise
 

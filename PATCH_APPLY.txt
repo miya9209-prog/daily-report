@@ -1,56 +1,21 @@
-MISHARP DAILY REPORT v3.4.0 — 일별 종합통계 UI/조회 로직 개편 통합본
+MISHARP DAILY REPORT v3.4.1 — Cafe24 회원가입 수집 보강 통합본
 
-이 ZIP은 바로 전 v3.3.9의 모든 수정사항을 포함합니다.
-따라서 v3.3.9를 별도로 적용할 필요 없이 이 ZIP 하나만 덮어쓰면 됩니다.
+v3.4.0 전체 수정사항을 그대로 포함한 누적 패치입니다.
+이 ZIP 하나만 덮어쓰면 됩니다.
 
-[이번 UI 개편]
-1. 일별 종합통계 타이틀 다음에 '오늘의 핵심 지표'
-   - 조회기간과 무관
-   - 항상 오늘 당일 데이터만 조회
-   - 아래 기간 버튼을 눌러도 절대 월누계/기간누계로 바뀌지 않음
+이번 수정:
+1. Cafe24 Dashboard 응답이 dict/list/nested 형태여도 new_members_count를 재귀 탐색
+2. new_members_count가 0이어도 정상값 0으로 DB 저장
+3. Cafe24 신규회원 API 단독 테스트 버튼 추가
+4. API 오류가 발생하면 더 이상 조용히 '자료없음'으로만 끝나지 않고 화면에 실제 오류 표시
+5. 오늘 Cafe24 수집 후 회원가입 DB 반영 여부를 즉시 표시
+6. sync 로그에도 member_signups 값/오류 기록
 
-2. 조회기간 위치 이동
-   - 오늘의 핵심 지표 아래
-   - 조회기간별 통계 바로 위
-   - 오늘 / 어제 / 최근 7일 / 이번 달 / 지난달 / 직접 선택
+Cafe24 공식 Admin Dashboard:
+- GET /api/v2/admin/dashboard
+- scope: mall.read_store
+- property: new_members_count
 
-3. '일별 통계' 제목 → '조회기간별 통계'
-   - 선택한 조회기간만 표시
-   - 최근 날짜가 가장 위
-
-4. '시간대별 매출·주문·방문 보기' 완전 삭제
-   - 화면 삭제
-   - 일별 XLSX의 시간대 시트도 삭제
-
-5. '전년도 · 전전년도 동일기간 비교'
-   - 조회기간별 통계 바로 아래 배치
-   - 위에서 선택한 조회기간에 따라 자동 변경
-   - 예: 2026-08-01~08-26 선택 시
-     2025-08-01~08-26 / 2024-08-01~08-26 비교
-
-[바로 전 v3.3.9 포함 내용]
-- 웹북마크 = 전체방문 - 광고유입 - 검색방문
-- 회원가입 Cafe24 Admin dashboard 수집
-- mall.read_store OAuth scope 자동 포함
-- 일별 통계 최근일자순
-- 대표 경보 1건 한 줄
-- Sellmate 실제 재고 업로드
-- Sellmate 발송내역 → 발송일자별 고유 송장수 → 택배수량 DB화
-- iApps/Sellmate 기존 날짜 안전 upsert
-- Cafe24 재고는 실제 재고로 사용하지 않음
-
-[덮어쓸 파일]
-- app.py
-- misharp/importers/manual_excel.py
-- misharp/repositories.py
-- misharp/ui/settings.py
-- misharp/ui/tabs/daily.py
-- misharp/ui/date_filters.py
-- misharp/services/query.py
-- misharp/services/comparison.py
-- misharp/services/sync_daily.py
-- misharp/connectors/cafe24_admin.py
-- misharp/connectors/cafe24_oauth.py
-
-DB schema / Secret 값 변경 없음.
-회원가입 수집용 mall.read_store 권한은 기존 토큰이면 Cafe24 OAuth 재승인 1회 필요.
+덮어쓸 파일은 ZIP 안 경로 그대로 모두 적용.
+DB schema / Secrets 변경 없음.
+OAuth를 이미 mall.read_store 포함 상태로 다시 승인했다면 추가 재승인은 필요 없음.

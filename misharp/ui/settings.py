@@ -11,6 +11,7 @@ from ..db import session_scope
 from ..repositories import get_token, latest_sync_runs
 from ..connectors.cafe24_oauth import build_authorize_url, effective_cafe24_scopes
 from ..connectors.cafe24_analytics import Cafe24AnalyticsClient
+from ..connectors.cafe24_admin import Cafe24AdminClient
 from ..services.query import daily_dataframe, inventory_dataframe
 from ..services.sync_daily import sync_cafe24_daily
 from ..services.sync_hourly import sync_hourly
@@ -107,6 +108,8 @@ def _sync_cafe24_day(day) -> dict:
         "date": daily.get("date", day.isoformat()),
         "상품행": products,
         "시간대행": hourly,
+        "member_signups": daily.get("member_signups"),
+        "member_signup_error": daily.get("member_signup_error"),
     }
 
 
@@ -181,7 +184,7 @@ def render() -> None:
             today = _local_today()
             yesterday = today - timedelta(days=1)
 
-            b1, b2, b3 = st.columns(3)
+            b1, b2, b3, b4 = st.columns(4)
 
             if b1.button("Cafe24 연결 테스트", use_container_width=True):
                 with st.spinner(f"{yesterday.isoformat()} Cafe24 Analytics를 확인하고 있습니다..."):
@@ -202,7 +205,25 @@ def render() -> None:
                     except Exception as exc:
                         st.error(f"Cafe24 연결 테스트 실패: {exc}")
 
-            if b2.button("어제 Cafe24 데이터 수집", use_container_width=True):
+            if b2.button("회원가입 API 테스트", use_container_width=True):
+                with st.spinner("Cafe24 Admin 신규회원 수를 확인하고 있습니다..."):
+                    try:
+                        result = Cafe24AdminClient().new_members_debug()
+                        parsed = result.get("parsed_new_members_count")
+                        if parsed is not None:
+                            st.success(f"Cafe24 신규회원 API 정상 · 현재 신규회원 {parsed:,}명")
+                        else:
+                            st.error(
+                                "Cafe24 Dashboard 응답은 받았지만 new_members_count 값을 해석하지 못했습니다."
+                            )
+                        st.json(result)
+                    except Exception as exc:
+                        st.error(
+                            "회원가입 API 호출 실패 · "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+
+            if b3.button("어제 Cafe24 데이터 수집", use_container_width=True):
                 with st.spinner(f"{yesterday.isoformat()} 일별·상품·시간대 데이터를 저장하고 있습니다..."):
                     try:
                         result = _sync_cafe24_day(yesterday)
@@ -215,13 +236,24 @@ def render() -> None:
                     except Exception as exc:
                         st.error(f"어제 Cafe24 데이터 수집 실패: {exc}")
 
-            if b3.button("오늘 Cafe24 데이터 수집", use_container_width=True):
+            if b4.button("오늘 Cafe24 데이터 수집", use_container_width=True):
                 with st.spinner(f"{today.isoformat()} 현재까지 데이터를 저장하고 있습니다..."):
                     try:
                         result = _sync_cafe24_day(today)
                         st.success(
                             f"{result['date']} 현재까지 수집 완료 · 상품 {result['상품행']:,}행 · 시간대 {result['시간대행']:,}행"
                         )
+                        member_value = result.get("member_signups")
+                        member_error = result.get("member_signup_error")
+                        if member_value is not None:
+                            st.success(f"회원가입 {int(member_value):,}명 DB 반영 확인")
+                        elif member_error:
+                            st.error(f"회원가입 수집 실패: {member_error}")
+                        else:
+                            st.warning(
+                                "Cafe24 Dashboard 호출은 끝났지만 신규회원 값이 비어 있습니다. "
+                                "왼쪽의 '회원가입 API 테스트' 결과를 확인해주세요."
+                            )
                         df = daily_dataframe(today, today)
                         if not df.empty:
                             render_report_table(df)
