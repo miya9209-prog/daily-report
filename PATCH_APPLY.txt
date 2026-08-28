@@ -1,30 +1,37 @@
-MISHARP DAILY REPORT v3.4.7 — Cafe24 + Google 광고비 통합 백필
+MISHARP DAILY REPORT v3.4.8 — Google 백필 환경변수/워크플로우 오류 수정 통합본
 
-이 ZIP은 v3.4.6까지의 모든 수정사항을 포함한 누적본입니다.
-이 ZIP 하나만 GitHub 경로 그대로 덮어쓰면 됩니다.
+원인:
+- v3.4.7의 scripts/backfill_cafe24.py는 Google 광고비 백필을 호출했지만,
+  실제 GitHub에서 실행된 backfill workflow는 이전 버전이라 Google 관련 Secret을 env로 넘기지 않았음.
+- 로그에서 Step 이름이 'Backfill Cafe24'였고 GOOGLE_SERVICE_ACCOUNT_JSON 등이 env 목록에 없었음.
+- 그래서 Cafe24는 기간 끝까지 정상 저장된 뒤 마지막 Google 단계에서 실패함.
 
-[이번 수정]
-1. MISHARP backfill 실행 시 Cafe24 백필 후 Google 광고비를 같은 기간 자동 백필
-2. Google 광고비는 요청기간(start_date~end_date)만 DB 반영
-3. Google Sheet 광고비를 공식 원천으로 우선 적용
-4. 광고비 반영 시 해당 날짜 실결제를 이용해 광고비율(%)도 함께 계산
-5. Google API는 날짜별 반복 호출하지 않고 백필 마지막에 한 번만 Sheet를 읽어 처리
-6. GitHub backfill workflow에 기존 Google Actions Secrets 연결 추가
-7. 6개월(최대 184일) 백필 / 180분 timeout / 기존 일일보고 보호 로직 유지
+이번 수정:
+1. Cafe24 백필과 Google 광고비 백필을 GitHub Actions에서 별도 Step으로 분리
+   - Cafe24가 끝난 뒤 Google이 실패해도 원인 구분이 명확함
+2. Google 전용 스크립트 scripts/backfill_google_ads.py 추가
+   - 실행 시작 즉시 필수 환경변수 사전검사
+   - Secret 누락이면 20분 기다린 뒤가 아니라 즉시 명확한 오류 표시
+3. Google 광고비 전용 수동 workflow 추가
+   - MISHARP Google ad cost backfill
+   - 이미 Cafe24가 완료된 기간은 Cafe24를 다시 돌리지 않고 광고비만 복구 가능
+4. 기존 MISHARP backfill도 앞으로는 Cafe24 + Google 광고비를 순차 수행
+5. 6개월 백필/일일보고 보호/웹북마크/회원가입/iApps/Sellmate 등 v3.4.7 이전 누적 수정 모두 포함
 
-[중요]
-- 새 Secrets를 만들 필요 없습니다. 기존 MISHARP data sync에서 사용 중인
-  GOOGLE_SERVICE_ACCOUNT_JSON / AD_SHEET_* GitHub Actions Secrets를 그대로 사용합니다.
-- 과거 일일보고 Excel은 다시 업로드할 필요 없습니다.
-- 기존 Cafe24 백필을 다시 전부 할 필요도 없습니다. 광고비가 비어 있는 기간은
-  v3.4.7 적용 후 같은 기간 MISHARP backfill을 실행하면 Google 광고비까지 함께 채워집니다.
-- 2026-05-31 이전 Cafe24 데이터는 overwrite_legacy 체크가 꺼져 있으면 기존 일일보고
-  기준값을 보존하고 빈 Cafe24 필드만 보충합니다. Google 광고비는 공식 광고비 원천이므로
-  같은 날짜가 Sheet에 있으면 Google 값이 우선됩니다.
-
-[주요 변경 파일]
-- misharp/services/sync_daily.py
-- scripts/backfill_cafe24.py
+반드시 덮어쓸 핵심 파일:
 - .github/workflows/backfill.yml
+- .github/workflows/backfill_google_ads.yml  (신규)
+- scripts/backfill_cafe24.py
+- scripts/backfill_google_ads.py           (신규)
 
-DB schema / Streamlit Secrets 변경 없음.
+중요:
+- GitHub Actions Secrets에는 기존대로 다음 이름이 있어야 함:
+  GOOGLE_SERVICE_ACCOUNT_JSON
+  AD_SHEET_ID
+  AD_SHEET_GID
+  AD_SHEET_DATE_HEADER
+  AD_SHEET_COST_HEADER
+- 새 Secret을 만드는 것이 아니라 기존 Secret을 최신 workflow가 전달하도록 고친 것.
+
+현재 실패한 2026-06-01~2026-08-26 작업은 Cafe24 부분이 이미 끝까지 정상 저장되었으므로
+패치 적용 후 'MISHARP Google ad cost backfill'만 같은 기간으로 실행하면 됨.
