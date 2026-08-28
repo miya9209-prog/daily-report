@@ -86,6 +86,37 @@ def upsert_daily(session, day: date, **values) -> DailyCondition:
     return row
 
 
+
+def fill_missing_daily(session, day: date, **values) -> DailyCondition:
+    """기존 값을 보존하고 NULL인 필드만 보충한다.
+
+    과거 일일보고(~2026-05-31)를 기준 데이터로 유지하면서 Cafe24 백필은
+    페이지뷰/상품퍼널처럼 원본에 없던 값만 채우기 위해 사용한다.
+    """
+    with session.no_autoflush:
+        row = session.scalar(
+            select(DailyCondition)
+            .where(DailyCondition.date == day)
+            .limit(1)
+        )
+
+    if row is None:
+        return upsert_daily(session, day, **values)
+
+    changed = False
+    for key, value in values.items():
+        if not hasattr(DailyCondition, key) or value is None or key == "sources":
+            continue
+        if getattr(row, key, None) is None:
+            setattr(row, key, value)
+            changed = True
+
+    if changed:
+        row.updated_at = datetime.utcnow()
+        session.flush()
+    return row
+
+
 def replace_hourly_for_day(session, day: date, records: list[dict]) -> int:
     session.execute(delete(HourlyCondition).where(HourlyCondition.date == day))
     for rec in records:

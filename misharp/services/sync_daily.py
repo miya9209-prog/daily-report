@@ -11,7 +11,7 @@ from ..db import session_scope
 from ..models import DailyCondition
 from ..config import get_settings
 from zoneinfo import ZoneInfo
-from ..repositories import finish_sync_run, start_sync_run, upsert_daily
+from ..repositories import fill_missing_daily, finish_sync_run, start_sync_run, upsert_daily
 
 
 def _sum(rows: list[dict], *keys: str) -> float | int | None:
@@ -29,7 +29,7 @@ def _local_today() -> date:
     return datetime.now(ZoneInfo(get_settings().app_timezone)).date()
 
 
-def sync_cafe24_daily(day: date) -> dict:
+def sync_cafe24_daily(day: date, fill_missing_only: bool = False) -> dict:
     client = Cafe24AnalyticsClient()
     sales = client.sales_times(day)
     visitor_rows = client.visitors(day, "day")
@@ -49,7 +49,7 @@ def sync_cafe24_daily(day: date) -> dict:
     # 미샵 정의: 웹북마크 = 전체방문 - 광고유입 - 검색방문
     bookmark_visits = None
     if visitors is not None and ad_visits is not None and search_visits is not None:
-        bookmark_visits = int(visitors) - int(ad_visits) - int(search_visits)
+        bookmark_visits = max(int(visitors) - int(ad_visits) - int(search_visits), 0)
 
     # Cafe24 Admin dashboard 신규회원 수는 오늘 값만 제공하므로 오늘 수집시에만 저장한다.
     member_signups = None
@@ -72,17 +72,27 @@ def sync_cafe24_daily(day: date) -> dict:
             elif member_signup_error:
                 sources["member_signups_error"] = member_signup_error
 
-            row = upsert_daily(db, day,
-                paid_amount=paid_amount, purchase_count=int(purchase_count) if purchase_count is not None else None,
-                avg_order_value=avg_order_value, conversion_rate=conversion_rate,
+            payload = dict(
+                paid_amount=paid_amount,
+                purchase_count=int(purchase_count) if purchase_count is not None else None,
+                avg_order_value=avg_order_value,
+                conversion_rate=conversion_rate,
                 visitors=int(visitors) if visitors is not None else None,
                 pageviews=int(pageviews) if pageviews is not None else None,
                 search_visits=int(search_visits) if search_visits is not None else None,
                 ad_visits=int(ad_visits) if ad_visits is not None else None,
                 bookmark_visits=bookmark_visits,
                 member_signups=member_signups,
-                sources=sources,
             )
+            if fill_missing_only:
+                row = fill_missing_daily(db, day, **payload)
+                merged_sources = dict(row.sources or {})
+                merged_sources["cafe24_missing_fill"] = "analytics_api"
+                if member_signups is not None:
+                    merged_sources["member_signups"] = "cafe24_admin_dashboard"
+                row.sources = merged_sources
+            else:
+                row = upsert_daily(db, day, **payload, sources=sources)
             finish_sync_run(
                 db,
                 run,
@@ -98,6 +108,7 @@ def sync_cafe24_daily(day: date) -> dict:
             return {
                 "date": row.date.isoformat(),
                 "status": "success",
+                "fill_missing_only": fill_missing_only,
                 "member_signups": member_signups,
                 "member_signup_error": member_signup_error,
             }
@@ -145,7 +156,7 @@ def sync_optional_daily_sources(day: date) -> None:
 
 
 def sync_recent_daily(days: int = 7, end_day: date | None = None) -> None:
-    end_day = end_day or date.today(); start_day = end_day - timedelta(days=max(days - 1, 0))
+    end_day = end_day or _local_today(); start_day = end_day - timedelta(days=max(days - 1, 0))
     day = start_day
     while day <= end_day:
         sync_cafe24_daily(day); sync_optional_daily_sources(day); day += timedelta(days=1)

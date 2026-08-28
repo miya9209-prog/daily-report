@@ -34,7 +34,7 @@ def _derived_bookmark_visits(row: DailyCondition):
     if row.visitors is None or row.ad_visits is None or row.search_visits is None:
         return None
     # 미샵 운영 정의: 웹북마크 = 전체방문 - 광고유입 - 검색방문
-    return int(row.visitors) - int(row.ad_visits) - int(row.search_visits)
+    return max(int(row.visitors) - int(row.ad_visits) - int(row.search_visits), 0)
 
 
 def _derived_daily_value(row: DailyCondition, field: str):

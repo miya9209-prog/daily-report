@@ -571,7 +571,7 @@ def render() -> None:
 
     st.info(
         "2026년 8월 1~24일처럼 Cafe24 자동수집 시작 전 누락된 최신 기간은 "
-        "GitHub → Actions → MISHARP backfill에서 시작일/종료일을 지정해 한 번만 실행하세요."
+        "GitHub → Actions → MISHARP backfill (2026-05-31 이전은 일일보고 값을 보존하고 Cafe24는 빈 필드만 보충)에서 시작일/종료일을 지정해 한 번만 실행하세요."
     )
 
     st.subheader("4. 데이터 운영 상태")
