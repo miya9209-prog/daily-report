@@ -4,7 +4,7 @@ import argparse
 from datetime import date, datetime, timedelta
 
 from misharp.db import init_db
-from misharp.services.sync_daily import sync_cafe24_daily
+from misharp.services.sync_daily import sync_cafe24_daily, sync_google_ad_costs
 from misharp.services.sync_products import sync_product_sales
 
 
@@ -52,9 +52,17 @@ def main() -> None:
 
         d += timedelta(days=1)
 
+    # 광고비는 Cafe24가 아니라 Google Sheet가 공식 원천이다.
+    # Cafe24 일별값을 모두 적재한 뒤 기간 전체를 한 번만 읽어 실결제 기준
+    # 광고비율까지 정확하게 계산한다.
+    print(f"[Google ad cost] {start} ~ {end}")
+    google_rows = sync_google_ad_costs(start_day=start, end_day=end)
+    print(f"[Google ad cost] rows={google_rows}")
+
     print(
         f"backfill complete: {start} ~ {end} / "
-        f"legacy primary end={LEGACY_PRIMARY_END} / overwrite_legacy={args.overwrite_legacy}"
+        f"legacy primary end={LEGACY_PRIMARY_END} / "
+        f"overwrite_legacy={args.overwrite_legacy} / google_rows={google_rows}"
     )
 
 

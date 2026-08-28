@@ -116,8 +116,26 @@ def sync_cafe24_daily(day: date, fill_missing_only: bool = False) -> dict:
             finish_sync_run(db, run, "failed", message=str(exc)); raise
 
 
-def sync_google_ad_costs() -> int:
+def sync_google_ad_costs(
+    start_day: date | None = None,
+    end_day: date | None = None,
+) -> int:
+    """Google Sheet 광고비를 DB에 반영한다.
+
+    start_day/end_day를 주면 해당 기간만 반영한다. 백필에서는 Cafe24를 먼저
+    저장한 뒤 이 함수를 1회 호출해 실결제 기준 광고비율까지 함께 계산한다.
+    Google Sheet 광고비는 미샵 DAILY REPORT의 광고비 공식 원천이므로, 기존
+    일일보고 광고비가 있어도 Sheet에 같은 날짜가 있으면 Google 값을 우선한다.
+    """
+    if start_day and end_day and end_day < start_day:
+        raise ValueError("Google 광고비 종료일은 시작일보다 빠를 수 없습니다.")
+
     costs = GoogleAdSheetClient().fetch_daily_costs()
+    if start_day is not None:
+        costs = {d: cost for d, cost in costs.items() if d >= start_day}
+    if end_day is not None:
+        costs = {d: cost for d, cost in costs.items() if d <= end_day}
+
     with session_scope() as db:
         run = start_sync_run(db, "google_adsheet")
         try:
@@ -125,11 +143,35 @@ def sync_google_ad_costs() -> int:
                 existing = db.get(DailyCondition, day)
                 sources = dict(existing.sources or {}) if existing else {}
                 sources["ad_cost"] = "google_sheets"
-                ratio = cost / existing.paid_amount * 100 if existing and existing.paid_amount else None
-                upsert_daily(db, day, ad_cost=cost, ad_cost_ratio=ratio, sources=sources)
-            finish_sync_run(db, run, "success", rows_written=len(costs)); return len(costs)
+                ratio = (
+                    cost / existing.paid_amount * 100
+                    if existing and existing.paid_amount
+                    else None
+                )
+                upsert_daily(
+                    db,
+                    day,
+                    ad_cost=cost,
+                    ad_cost_ratio=ratio,
+                    sources=sources,
+                )
+
+            range_text = (
+                f"{start_day}~{end_day}"
+                if start_day is not None or end_day is not None
+                else "all"
+            )
+            finish_sync_run(
+                db,
+                run,
+                "success",
+                rows_written=len(costs),
+                message=f"range={range_text}",
+            )
+            return len(costs)
         except Exception as exc:
-            finish_sync_run(db, run, "failed", message=str(exc)); raise
+            finish_sync_run(db, run, "failed", message=str(exc))
+            raise
 
 
 def sync_optional_daily_sources(day: date) -> None:

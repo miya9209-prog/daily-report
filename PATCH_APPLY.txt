@@ -1,19 +1,30 @@
-MISHARP DAILY REPORT v3.4.6 — 6개월 백필 제한 수정 누적본
+MISHARP DAILY REPORT v3.4.7 — Cafe24 + Google 광고비 통합 백필
 
-이 ZIP은 v3.4.5까지의 모든 수정사항을 포함합니다.
+이 ZIP은 v3.4.6까지의 모든 수정사항을 포함한 누적본입니다.
+이 ZIP 하나만 GitHub 경로 그대로 덮어쓰면 됩니다.
 
 [이번 수정]
-1. 백필 1회 최대기간을 121일 → 184일(약 6개월)로 확대
-   - 2026-01-01 ~ 2026-06-30 실행 가능
-   - 2025-07-01 ~ 2025-12-31도 실행 가능
-2. GitHub Actions 백필 timeout 60분 → 180분
-3. workflow의 eval 문자열 실행을 bash 배열 방식으로 변경해 날짜/옵션 전달 안정화
-4. 기존 일일보고 보호 규칙 유지
-   - 2026-05-31 이전 overwrite_legacy 체크 안 함: 기존값 보존 + Cafe24 빈칸만 보충
+1. MISHARP backfill 실행 시 Cafe24 백필 후 Google 광고비를 같은 기간 자동 백필
+2. Google 광고비는 요청기간(start_date~end_date)만 DB 반영
+3. Google Sheet 광고비를 공식 원천으로 우선 적용
+4. 광고비 반영 시 해당 날짜 실결제를 이용해 광고비율(%)도 함께 계산
+5. Google API는 날짜별 반복 호출하지 않고 백필 마지막에 한 번만 Sheet를 읽어 처리
+6. GitHub backfill workflow에 기존 Google Actions Secrets 연결 추가
+7. 6개월(최대 184일) 백필 / 180분 timeout / 기존 일일보고 보호 로직 유지
 
-적용 후 기존 실패 Job을 Re-run하지 말고 새 Run workflow로 같은 기간을 다시 실행하세요.
-권장:
-- skip_products: 체크 안 함
-- overwrite_legacy: 체크 안 함
+[중요]
+- 새 Secrets를 만들 필요 없습니다. 기존 MISHARP data sync에서 사용 중인
+  GOOGLE_SERVICE_ACCOUNT_JSON / AD_SHEET_* GitHub Actions Secrets를 그대로 사용합니다.
+- 과거 일일보고 Excel은 다시 업로드할 필요 없습니다.
+- 기존 Cafe24 백필을 다시 전부 할 필요도 없습니다. 광고비가 비어 있는 기간은
+  v3.4.7 적용 후 같은 기간 MISHARP backfill을 실행하면 Google 광고비까지 함께 채워집니다.
+- 2026-05-31 이전 Cafe24 데이터는 overwrite_legacy 체크가 꺼져 있으면 기존 일일보고
+  기준값을 보존하고 빈 Cafe24 필드만 보충합니다. Google 광고비는 공식 광고비 원천이므로
+  같은 날짜가 Sheet에 있으면 Google 값이 우선됩니다.
 
-DB schema / Secrets 변경 없음.
+[주요 변경 파일]
+- misharp/services/sync_daily.py
+- scripts/backfill_cafe24.py
+- .github/workflows/backfill.yml
+
+DB schema / Streamlit Secrets 변경 없음.
