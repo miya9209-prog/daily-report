@@ -19,12 +19,44 @@ DAILY_COLUMNS = {
 }
 
 
+def _safe_rate(numerator, denominator):
+    if numerator is None or denominator in (None, 0):
+        return None
+    try:
+        return float(numerator) / float(denominator) * 100
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def _derived_bookmark_visits(row: DailyCondition):
     if row.bookmark_visits is not None:
         return row.bookmark_visits
     if row.visitors is None or row.ad_visits is None or row.search_visits is None:
         return None
+    # 미샵 운영 정의: 웹북마크 = 전체방문 - 광고유입 - 검색방문
     return int(row.visitors) - int(row.ad_visits) - int(row.search_visits)
+
+
+def _derived_daily_value(row: DailyCondition, field: str):
+    """DB가 비어 있어도 기존 원천값으로 계산 가능한 파생지표는 즉시 계산한다.
+
+    과거 일일보고 Excel은 이미 DB에 적재되어 있으므로 재업로드 없이
+    화면/비교/다운로드에서 바로 값이 보이도록 한다.
+    """
+    value = getattr(row, field)
+
+    if field == "ad_cost_ratio":
+        return value if value is not None else _safe_rate(row.ad_cost, row.paid_amount)
+    if field == "bookmark_visits":
+        return _derived_bookmark_visits(row)
+    if field == "view_to_cart_rate":
+        return value if value is not None else _safe_rate(row.add_cart_count, row.product_views)
+    if field == "view_to_order_rate":
+        return value if value is not None else _safe_rate(row.product_order_count, row.product_views)
+    if field == "cart_to_order_rate":
+        return value if value is not None else _safe_rate(row.product_order_count, row.add_cart_count)
+
+    return value
 
 
 def daily_dataframe(start: date, end: date) -> pd.DataFrame:
@@ -39,7 +71,7 @@ def daily_dataframe(start: date, end: date) -> pd.DataFrame:
     for r in rows:
         rec = {}
         for field, label in DAILY_COLUMNS.items():
-            rec[label] = _derived_bookmark_visits(r) if field == "bookmark_visits" else getattr(r, field)
+            rec[label] = _derived_daily_value(r, field)
         records.append(rec)
     return pd.DataFrame(records, columns=list(DAILY_COLUMNS.values()))
 

@@ -17,6 +17,7 @@ SHEET_RE = re.compile(r"(?P<year>20\d{2})년\s*(?P<month>\d{1,2})월")
 ALIASES = {
     "paid_amount": ["실결제"],
     "ad_cost": ["일별광고비", "광고비"],
+    "ad_cost_ratio": ["광고비율", "광고비율(%)"],
     "purchase_count": ["구매건수"],
     "avg_order_value": ["객단가"],
     "conversion_rate": ["전환율"],
@@ -129,7 +130,7 @@ def _parse_workbook(file_bytes: bytes, end_date: date | None = None) -> tuple[li
             values = {}
             for field, col in colmap.items():
                 raw = row[col] if col < len(row) else None
-                if field == "conversion_rate":
+                if field in {"conversion_rate", "ad_cost_ratio"}:
                     v = _normalize_conversion(raw)
                 elif field in {"purchase_count", "visitors", "pageviews", "search_visits", "ad_visits", "bookmark_visits", "app_installs", "app_unique_visits", "shipping_count", "member_signups"}:
                     v = _as_int(raw)
@@ -138,6 +139,20 @@ def _parse_workbook(file_bytes: bytes, end_date: date | None = None) -> tuple[li
                 if v is not None:
                     values[field] = v
             if values:
+                # 원본에 값이 없어도 계산 가능한 파생지표는 여기서 보완한다.
+                if values.get("ad_cost_ratio") is None:
+                    paid = values.get("paid_amount")
+                    ad = values.get("ad_cost")
+                    if paid not in (None, 0) and ad is not None:
+                        values["ad_cost_ratio"] = float(ad) / float(paid) * 100
+
+                if values.get("bookmark_visits") is None:
+                    visitors = values.get("visitors")
+                    ad_visits = values.get("ad_visits")
+                    search_visits = values.get("search_visits")
+                    if visitors is not None and ad_visits is not None and search_visits is not None:
+                        values["bookmark_visits"] = int(visitors) - int(ad_visits) - int(search_visits)
+
                 records.append({"date": d, **values})
     wb.close()
     return records, notes
