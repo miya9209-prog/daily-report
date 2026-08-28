@@ -146,12 +146,16 @@ def _parse_workbook(file_bytes: bytes, end_date: date | None = None) -> tuple[li
                     if paid not in (None, 0) and ad is not None:
                         values["ad_cost_ratio"] = float(ad) / float(paid) * 100
 
-                if values.get("bookmark_visits") is None:
-                    visitors = values.get("visitors")
-                    ad_visits = values.get("ad_visits")
-                    search_visits = values.get("search_visits")
-                    if visitors is not None and ad_visits is not None and search_visits is not None:
-                        values["bookmark_visits"] = int(visitors) - int(ad_visits) - int(search_visits)
+                # 과거 Excel의 웹북마크 원값은 사용하지 않고 미샵 운영 정의로 재계산한다.
+                visitors = values.get("visitors")
+                ad_visits = values.get("ad_visits")
+                search_visits = values.get("search_visits")
+                if visitors is not None and ad_visits is not None and search_visits is not None:
+                    values["bookmark_visits"] = max(
+                        int(visitors) - int(ad_visits) - int(search_visits), 0
+                    )
+                else:
+                    values.pop("bookmark_visits", None)
 
                 records.append({"date": d, **values})
     wb.close()

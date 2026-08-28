@@ -30,9 +30,11 @@ def aggregate_range(start: date, end: date) -> dict:
     for field, label in SUM_FIELDS.items():
         vals = []
         for r in rows:
-            if field == "bookmark_visits" and r.bookmark_visits is None:
+            if field == "bookmark_visits":
+                # 미샵 운영 정의를 항상 적용한다. DB에 과거 웹북마크 값이 있어도 사용하지 않는다.
+                # 웹북마크 = 전체방문 - 광고유입 - 검색방문
                 if r.visitors is not None and r.ad_visits is not None and r.search_visits is not None:
-                    vals.append(int(r.visitors) - int(r.ad_visits) - int(r.search_visits))
+                    vals.append(max(int(r.visitors) - int(r.ad_visits) - int(r.search_visits), 0))
                 continue
             value = getattr(r, field)
             if value is not None:

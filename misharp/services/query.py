@@ -29,11 +29,11 @@ def _safe_rate(numerator, denominator):
 
 
 def _derived_bookmark_visits(row: DailyCondition):
-    if row.bookmark_visits is not None:
-        return row.bookmark_visits
+    # 미샵 운영 정의는 DB의 과거 웹북마크 원값보다 항상 우선한다.
+    # 웹북마크 = 전체방문 - 광고유입 - 검색방문
+    # 세 원천값 중 하나라도 없으면 임의 추정하지 않고 자료없음(None)으로 둔다.
     if row.visitors is None or row.ad_visits is None or row.search_visits is None:
         return None
-    # 미샵 운영 정의: 웹북마크 = 전체방문 - 광고유입 - 검색방문
     return max(int(row.visitors) - int(row.ad_visits) - int(row.search_visits), 0)
 
 
