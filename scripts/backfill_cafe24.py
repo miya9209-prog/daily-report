@@ -30,8 +30,10 @@ def main() -> None:
     start, end = parse_date(args.start), parse_date(args.end)
     if end < start:
         raise SystemExit("end는 start보다 빠를 수 없습니다.")
-    if (end - start).days > 120:
-        raise SystemExit("한 번에 최대 121일까지만 백필하세요.")
+    # 반기(6개월) 단위 백필을 허용합니다.
+    # Jul 1 ~ Dec 31처럼 긴 반기도 포함하도록 최대 184일(포함 기준)까지 허용합니다.
+    if (end - start).days > 183:
+        raise SystemExit("한 번에 최대 184일(약 6개월)까지만 백필하세요.")
 
     init_db()
     d = start
